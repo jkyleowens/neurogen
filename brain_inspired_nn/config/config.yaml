@@ -1,73 +1,58 @@
-# Configuration for Brain-Inspired Neural Network System
+# Configuration for Brain-Inspired Neural Network Stock Prediction
 
-# General settings
 general:
   seed: 42
   device: "cuda"  # or "cpu"
-  log_dir: "logs/"
-  checkpoint_dir: "checkpoints/"
+  log_dir: "logs/stock_prediction/"
+  checkpoint_dir: "checkpoints/stock_prediction/"
+  results_dir: "results/stock_prediction/"
+
+data:
+  # Stock selection
+  ticker_symbol: "AAPL"
+  start_date: "2018-01-01"
+  end_date: "2023-01-01"
   
-# GRU Controller settings
+  # Sequence modeling parameters
+  sequence_length: 60  # 60 days of price history
+  prediction_horizon: 5  # Predict 5 days ahead
+  target_column: "Close"
+  feature_columns: ["Open", "High", "Low", "Close", "Volume", "Adj Close"]
+  
+  # Technical indicators (automatically calculated)
+  use_technical_indicators: true
+  ma_windows: [5, 10, 20, 50]
+  rsi_window: 14
+  bb_window: 20
+  bb_std_dev: 2
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  
+  # Dataset split
+  train_ratio: 0.7
+  val_ratio: 0.15  # Remaining 0.15 for test
+
+# Parameters must match the structure expected by BrainInspiredNN
 controller:
-  hidden_size: 256
+  hidden_size: 256  # Match original config 
+  persistent_memory_size: 128  # Match original config
   num_layers: 2
-  dropout: 0.1
-  persistent_memory_size: 128
-  
-# Neuromodulator settings
+  dropout: 0.2  # Slightly higher for financial data
+
 neuromodulator:
-  dopamine_scale: 1.0
-  serotonin_scale: 0.8
-  norepinephrine_scale: 0.6
-  acetylcholine_scale: 0.7
-  reward_decay: 0.95
-  
-# Training settings
+  # Enhanced neuromodulation for financial market dynamics
+  dopamine_scale: 1.2  # Increased for reward prediction in markets
+  serotonin_scale: 0.8  # Balanced risk assessment
+  norepinephrine_scale: 1.0  # Enhanced attention to volatility
+  acetylcholine_scale: 0.9  # Enhanced memory formation
+  reward_decay: 0.97  # Slightly higher than default for longer memory
+
 training:
-  batch_size: 64
-  learning_rate: 0.001
-  num_epochs: 100
+  batch_size: 32
+  learning_rate: 0.0005  # Lower learning rate for stability
+  num_epochs: 150
   optimizer: "adam"
   scheduler: "cosine"
-  
-# LLM Integration settings
-llm:
-  # General LLM settings
-  provider: "huggingface"  # Options: "openai", "huggingface", "anthropic"
-  api_endpoint: ""  # Leave empty to use default endpoints
-  model_name: "gpt-4"
-  max_tokens: 1024
-  temperature: 0.7
-  embedding_dim: 768
-  
-  # Provider-specific settings
-  openai:
-    api_key: ""  # Set via environment variable OPENAI_API_KEY
-    model_name: "gpt-4"
-    embedding_model: "text-embedding-3-small"
-  
-  huggingface:
-    api_key: ""  # Set via environment variable HF_API_TOKEN
-    model_name: "mistralai/Mistral-7B-Instruct-v0.2"
-    embedding_model: "sentence-transformers/all-mpnet-base-v2"
-  
-  anthropic:
-    api_key: ""  # Set via environment variable ANTHROPIC_API_KEY
-    model_name: "claude-3-sonnet-20240229"
-  
-  # LLM validation settings
-  validation:
-    prompts:
-      - "Explain how neural networks process information similar to the human brain."
-      - "Describe the role of neuromodulators in learning and memory."
-      - "How does persistent memory affect long-term learning in neural systems?"
-      - "Compare artificial neural networks to biological neural networks."
-      - "Explain the concept of reward prediction error in reinforcement learning."
-    
-    interval: 5  # Validate every N epochs
-    
-  # LLM training settings
-  training:
-    use_llm_feedback: true  # Whether to use LLM feedback during training
-    feedback_weight: 0.5  # Weight of LLM feedback in loss calculation
-    generate_data: false  # Whether to generate training data using LLM
+  early_stopping: true
+  patience: 20

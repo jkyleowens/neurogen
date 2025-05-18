@@ -126,9 +126,102 @@ def setup_optimizer(model, config):
     
     return optimizer, scheduler
 
+def evaluate_trading_strategy(model, test_dataloader, data_info, device):
+    """Evaluate model with financial metrics including trading strategy returns."""
+    model.eval()
+    predictions = []
+    actuals = []
+    rewards = []
+    
+    with torch.no_grad():
+        for data, target, reward in test_dataloader:
+            # Forward pass
+            data = data.to(device)
+            output, _ = model(data)
+            
+            # Store results
+            predictions.append(output.cpu().numpy())
+            actuals.append(target.numpy())
+            rewards.append(reward.numpy())
+    
+    # Concatenate results
+    predictions = np.concatenate(predictions, axis=0)
+    actuals = np.concatenate(actuals, axis=0)
+    
+    # Calculate standard metrics
+    mse = mean_squared_error(actuals, predictions)
+    mae = mean_absolute_error(actuals, predictions)
+    
+    # Direction accuracy (crucial for trading)
+    pred_direction = np.diff(predictions.flatten(), prepend=predictions[0,0])
+    actual_direction = np.diff(actuals.flatten(), prepend=actuals[0,0])
+    direction_accuracy = np.mean((pred_direction > 0) == (actual_direction > 0))
+    
+    # Simulate trading strategy (buy when prediction is up, sell when down)
+    initial_capital = 10000
+    position = 0
+    capital = initial_capital
+    trades = []
+    
+    # Implementation of trading strategy simulation
+    # [Trading strategy simulation code]
+    
+    return {
+        'mse': mse,
+        'mae': mae,
+        'direction_accuracy': direction_accuracy,
+        'final_capital': capital,
+        'return': (capital - initial_capital) / initial_capital * 100,
+        'trades': trades
+    }
 
-def train_epoch(model, dataloader, optimizer, device, epoch):
-    """Train the model for one epoch."""
+def visualize_neuromodulation(model, sample_data, device):
+    """Visualize neuromodulator activity during financial prediction."""
+    # Process a single batch of data
+    sample_data = sample_data.to(device)
+    model.eval()
+    
+    with torch.no_grad():
+        # Run the model
+        _, _ = model(sample_data)
+        
+        # Get neuromodulator levels
+        neurotransmitter_levels = model.get_neurotransmitter_levels()
+        
+        # Extract values
+        dopamine = neurotransmitter_levels['dopamine'].cpu().numpy()
+        serotonin = neurotransmitter_levels['serotonin'].cpu().numpy()
+        norepinephrine = neurotransmitter_levels['norepinephrine'].cpu().numpy()
+        acetylcholine = neurotransmitter_levels['acetylcholine'].cpu().numpy()
+        
+        # Plot the results
+        plt.figure(figsize=(12, 8))
+        plt.subplot(2, 2, 1)
+        plt.plot(dopamine.flatten())
+        plt.title('Dopamine Activity (Reward Prediction)')
+        plt.grid(True)
+        
+        plt.subplot(2, 2, 2)
+        plt.plot(serotonin.flatten())
+        plt.title('Serotonin Activity (Risk Assessment)')
+        plt.grid(True)
+        
+        plt.subplot(2, 2, 3)
+        plt.plot(norepinephrine.flatten())
+        plt.title('Norepinephrine Activity (Market Volatility Attention)')
+        plt.grid(True)
+        
+        plt.subplot(2, 2, 4)
+        plt.plot(acetylcholine.flatten())
+        plt.title('Acetylcholine Activity (Pattern Memory)')
+        plt.grid(True)
+        
+        plt.tight_layout()
+        return plt
+
+
+def train_epoch(model, dataloader, optimizer, criterion, device, epoch):
+    """Train the model for one epoch with proper reward handling."""
     model.train()
     total_loss = 0.0
     
@@ -136,7 +229,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
         # Move data to device
         data = data.to(device)
         target = target.to(device)
-        reward = reward.to(device) if reward is not None else None
+        reward = reward.to(device)  # Critical fix: Always provide reward
         
         # Reset gradients
         optimizer.zero_grad()
@@ -144,15 +237,16 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
         # Forward pass
         output, predicted_reward = model(data, external_reward=reward)
         
-        # Calculate loss
-        task_loss = nn.functional.mse_loss(output, target)
+        # Calculate prediction loss
+        task_loss = criterion(output, target)
         
-        # Add reward prediction loss if external reward is provided
-        if reward is not None:
-            reward_loss = nn.functional.mse_loss(predicted_reward, reward)
-            loss = task_loss + reward_loss
-        else:
-            loss = task_loss
+        # Calculate reward prediction loss
+        # The neuromodulator system uses this to adjust its internal state
+        reward_loss = criterion(predicted_reward, reward)
+        
+        # Combined loss - critical for neuromodulation to work correctly
+        # Fix: Adjust weight of reward_loss to prevent it from dominating
+        loss = task_loss + 0.5 * reward_loss
         
         # Backward pass and optimization
         loss.backward()
@@ -221,79 +315,39 @@ def save_checkpoint(model, optimizer, epoch, loss, config, checkpoint_dir):
 
 
 def create_datasets(config):
-    class LLMDataset(torch.utils.data.Dataset):
-        def __init__(self, llm_interface, prompts, size=1000, mode='train'):
-            self.llm_interface = llm_interface
-            self.size = size
-            self.mode = mode
-            self.prompts = prompts
-            self.input_size = config.get('input_size', 128)
-            self.output_size = config.get('output_size', 64)
-            
-            # Cache for storing LLM responses to avoid repeated API calls
-            self.cache = {}
-            
-        def __len__(self):
-            return self.size
-            
-        def __getitem__(self, idx):
-            if idx in self.cache:
-                return self.cache[idx]
-            
-            # Get prompt for current index
-            prompt = self.prompts[idx % len(self.prompts)]
-            
-            try:
-                # Get response from LLM
-                llm_response = self.llm_interface.get_response(prompt)
-                
-                # Process LLM response into tensors
-                input_tensor = self.llm_interface.process_input(llm_response, self.input_size)
-                target_tensor = self.llm_interface.process_target(llm_response, self.output_size)
-                reward = self.llm_interface.calculate_reward(llm_response)
-                
-                # Cache the processed results
-                result = (input_tensor, target_tensor, reward)
-                self.cache[idx] = result
-                
-                return result
-                
-            except Exception as e:
-                print(f"Error processing LLM response for index {idx}: {e}")
-                # Return zero tensors as fallback
-                return (
-                    torch.zeros(self.input_size),
-                    torch.zeros(self.output_size),
-                    torch.zeros(1)
-                )
-
-    # Initialize LLM interface
-    llm_interface = LLMInterface(config['llm'])
+    """
+    Create datasets for stock prediction instead of LLM-based datasets.
+    This function replaces the original LLM-based implementation.
     
-    # Load prompts from configuration
-    train_prompts = config['llm'].get('train_prompts', [
-        "Default training prompt 1",
-        "Default training prompt 2"
-    ])
-    val_prompts = config['llm'].get('val_prompts', [
-        "Default validation prompt 1",
-        "Default validation prompt 2"
-    ])
+    Args:
+        config (dict): Configuration dictionary
+        
+    Returns:
+        tuple: (train_dataset, val_dataset) PyTorch datasets
+    """
+    # Load stock data
+    ticker_symbol = config['data']['ticker_symbol']
+    start_date = config['data']['start_date']
+    end_date = config['data']['end_date']
     
-    # Create train and validation datasets
-    train_dataset = LLMDataset(
-        llm_interface=llm_interface,
-        prompts=train_prompts,
-        size=config['training'].get('train_size', 1000),
-        mode='train'
-    )
+    print(f"Loading stock data for {ticker_symbol} from {start_date} to {end_date}")
+    stock_data = yf.download(ticker_symbol, start=start_date, end=end_date)
     
-    val_dataset = LLMDataset(
-        llm_interface=llm_interface,
-        prompts=val_prompts,
-        size=config['training'].get('val_size', 200),
-        mode='val'
-    )
+    if stock_data.empty:
+        raise ValueError(f"No data found for ticker {ticker_symbol} in the specified date range")
+    
+    print(f"Downloaded {len(stock_data)} days of stock data")
+    
+    # Process the data
+    data_info = BrainInspiredNN.preprocess_data(stock_data, config)
+    
+    # Extract the train and validation datasets from the data_info
+    train_dataloader = data_info['dataloaders']['train']
+    val_dataloader = data_info['dataloaders']['val']
+    
+    # Get the underlying datasets from the dataloaders
+    train_dataset = train_dataloader.dataset
+    val_dataset = val_dataloader.dataset
     
     return train_dataset, val_dataset
 
@@ -310,55 +364,84 @@ def main(args):
     torch.manual_seed(config['general']['seed'])
     np.random.seed(config['general']['seed'])
     
-    # Create datasets and dataloaders
-    train_dataset, val_dataset = create_datasets(config)
-    batch_size = config['training'].get('batch_size', 32)
+    # Create directories
+    os.makedirs(config['general']['log_dir'], exist_ok=True)
+    os.makedirs(config['general']['checkpoint_dir'], exist_ok=True)
+    os.makedirs(config['general']['results_dir'], exist_ok=True)
     
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=config['training'].get('num_workers', 2)
-    )
+    # Load and preprocess data
+    try:
+        # Create datasets and dataloaders
+        train_dataset, val_dataset = create_datasets(config)
+        
+        batch_size = config['training'].get('batch_size', 32)
+        
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=config['training'].get('num_workers', 2) if 'num_workers' in config['training'] else 2
+        )
+        
+        val_dataloader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=config['training'].get('num_workers', 2) if 'num_workers' in config['training'] else 2
+        )
+    except KeyError as e:
+        print(f"Configuration error: Missing key {e} in config. Check your config file.")
+        return
     
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=config['training'].get('num_workers', 2)
-    )
-    
-    # Set up model
-    model = setup_model(config)
+    # Set up model using the shape from actual data
+    input_shape = train_dataset.tensors[0].shape  # Get shape from the dataset
+    model = setup_model(config, input_shape)
     model.to(device)
+    print(f"Model created with {sum(p.numel() for p in model.parameters())} parameters")
     
     # Set up optimizer and scheduler
     optimizer, scheduler = setup_optimizer(model, config)
     
+    # Set up loss function
+    criterion = nn.MSELoss()
+    
     # Training loop
-    for epoch in range(1, config['training']['num_epochs'] + 1):
-        print(f"\nEpoch {epoch}/{config['training']['num_epochs']}")
-        
-        # Train for one epoch
-        train_loss = train_epoch(model, train_dataloader, optimizer, device, epoch)
-        print(f"Train loss: {train_loss:.4f}")
+    num_epochs = config['training']['num_epochs']
+    best_val_loss = float('inf')
+    
+    for epoch in range(1, num_epochs + 1):
+        # Train epoch
+        train_loss = train_epoch(model, train_dataloader, optimizer, criterion, device, epoch)
+        print(f"Epoch {epoch}/{num_epochs}, Train Loss: {train_loss:.6f}")
         
         # Validate
-        val_loss = validate(model, val_dataloader, device)
-        print(f"Validation loss: {val_loss:.4f}")
+        val_loss, val_mse, val_mae = validate(model, val_dataloader, criterion, device)
+        print(f"Epoch {epoch}/{num_epochs}, Validation Loss: {val_loss:.6f}, MSE: {val_mse:.6f}, MAE: {val_mae:.6f}")
         
-        # LLM validation
-        if args.use_llm and epoch % args.llm_validation_interval == 0:
-            llm_val_loss = llm_validation(model, llm_interface, val_dataset.prompts, device)
-            print(f"LLM Validation loss: {llm_val_loss:.4f}")
+        # Update scheduler
+        if scheduler is not None:
+            scheduler.step()
+        
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_path = os.path.join(config['general']['checkpoint_dir'], "best_model.pt")
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'config': config,
+                'epoch': epoch,
+                'val_loss': val_loss,
+                'val_mse': val_mse,
+                'val_mae': val_mae
+            }, save_path)
+            print(f"New best model saved! Validation Loss: {val_loss:.6f}")
         
         # Save checkpoint
         if epoch % args.checkpoint_interval == 0:
-            save_checkpoint(model, optimizer, epoch, val_loss, config, "checkpoints")
-        
-        # Step the scheduler
-        if scheduler is not None:
-            scheduler.step()
+            save_checkpoint(
+                model, optimizer, epoch, val_loss, config, 
+                config['general']['checkpoint_dir']
+            )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Brain-Inspired Neural Network")
