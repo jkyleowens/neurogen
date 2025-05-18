@@ -1,0 +1,73 @@
+# Configuration for Brain-Inspired Neural Network System
+
+# General settings
+general:
+  seed: 42
+  device: "cuda"  # or "cpu"
+  log_dir: "logs/"
+  checkpoint_dir: "checkpoints/"
+  
+# GRU Controller settings
+controller:
+  hidden_size: 256
+  num_layers: 2
+  dropout: 0.1
+  persistent_memory_size: 128
+  
+# Neuromodulator settings
+neuromodulator:
+  dopamine_scale: 1.0
+  serotonin_scale: 0.8
+  norepinephrine_scale: 0.6
+  acetylcholine_scale: 0.7
+  reward_decay: 0.95
+  
+# Training settings
+training:
+  batch_size: 64
+  learning_rate: 0.001
+  num_epochs: 100
+  optimizer: "adam"
+  scheduler: "cosine"
+  
+# LLM Integration settings
+llm:
+  # General LLM settings
+  provider: "openai"  # Options: "openai", "huggingface", "anthropic"
+  api_endpoint: ""  # Leave empty to use default endpoints
+  model_name: "gpt-4"
+  max_tokens: 1024
+  temperature: 0.7
+  embedding_dim: 768
+  
+  # Provider-specific settings
+  openai:
+    api_key: ""  # Set via environment variable OPENAI_API_KEY
+    model_name: "gpt-4"
+    embedding_model: "text-embedding-3-small"
+  
+  huggingface:
+    api_key: ""  # Set via environment variable HF_API_TOKEN
+    model_name: "mistralai/Mistral-7B-Instruct-v0.2"
+    embedding_model: "sentence-transformers/all-mpnet-base-v2"
+  
+  anthropic:
+    api_key: ""  # Set via environment variable ANTHROPIC_API_KEY
+    model_name: "claude-3-sonnet-20240229"
+  
+  # LLM validation settings
+  validation:
+    prompts:
+      - "Explain how neural networks process information similar to the human brain."
+      - "Describe the role of neuromodulators in learning and memory."
+      - "How does persistent memory affect long-term learning in neural systems?"
+      - "Compare artificial neural networks to biological neural networks."
+      - "Explain the concept of reward prediction error in reinforcement learning."
+    
+    interval: 5  # Validate every N epochs
+    
+  # LLM training settings
+  training:
+    use_llm_feedback: true  # Whether to use LLM feedback during training
+    feedback_weight: 0.5  # Weight of LLM feedback in loss calculation
+    generate_data: false  # Whether to generate training data using LLM
