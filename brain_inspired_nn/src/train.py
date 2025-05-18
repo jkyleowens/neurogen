@@ -19,6 +19,33 @@ from torch.utils.data import DataLoader
 from model import BrainInspiredNN
 from utils.llm_interface import LLMInterface
 
+# Example using PyTorch
+
+class LLMInterface:
+    def __init__(self, config):
+        self.config = config
+        # Initialize LLM connection
+        
+    def generate_prompt(self, mode):
+        """Generate appropriate prompt based on mode (train/val)."""
+        # Return prompt string
+        
+    def get_response(self, prompt):
+        """Get response from LLM."""
+        # Return LLM response
+        
+    def process_input(self, llm_response, input_size):
+        """Convert LLM response to input tensor."""
+        # Return torch.Tensor of size (input_size,)
+        
+    def process_target(self, llm_response, output_size):
+        """Convert LLM response to target tensor."""
+        # Return torch.Tensor of size (output_size,)
+        
+    def calculate_reward(self, llm_response):
+        """Calculate reward based on LLM response."""
+        # Return float or torch.Tensor of size (1,)
+
 
 def load_config(config_path):
     """Load configuration from YAML file."""
@@ -188,6 +215,83 @@ def save_checkpoint(model, optimizer, epoch, loss, config, checkpoint_dir):
     print(f"Checkpoint saved to {checkpoint_path}")
 
 
+def create_datasets(config):
+    class LLMDataset(torch.utils.data.Dataset):
+        def __init__(self, llm_interface, prompts, size=1000, mode='train'):
+            self.llm_interface = llm_interface
+            self.size = size
+            self.mode = mode
+            self.prompts = prompts
+            self.input_size = config.get('input_size', 128)
+            self.output_size = config.get('output_size', 64)
+            
+            # Cache for storing LLM responses to avoid repeated API calls
+            self.cache = {}
+            
+        def __len__(self):
+            return self.size
+            
+        def __getitem__(self, idx):
+            if idx in self.cache:
+                return self.cache[idx]
+            
+            # Get prompt for current index
+            prompt = self.prompts[idx % len(self.prompts)]
+            
+            try:
+                # Get response from LLM
+                llm_response = self.llm_interface.get_response(prompt)
+                
+                # Process LLM response into tensors
+                input_tensor = self.llm_interface.process_input(llm_response, self.input_size)
+                target_tensor = self.llm_interface.process_target(llm_response, self.output_size)
+                reward = self.llm_interface.calculate_reward(llm_response)
+                
+                # Cache the processed results
+                result = (input_tensor, target_tensor, reward)
+                self.cache[idx] = result
+                
+                return result
+                
+            except Exception as e:
+                print(f"Error processing LLM response for index {idx}: {e}")
+                # Return zero tensors as fallback
+                return (
+                    torch.zeros(self.input_size),
+                    torch.zeros(self.output_size),
+                    torch.zeros(1)
+                )
+
+    # Initialize LLM interface
+    llm_interface = LLMInterface(config['llm'])
+    
+    # Load prompts from configuration
+    train_prompts = config['llm'].get('train_prompts', [
+        "Default training prompt 1",
+        "Default training prompt 2"
+    ])
+    val_prompts = config['llm'].get('val_prompts', [
+        "Default validation prompt 1",
+        "Default validation prompt 2"
+    ])
+    
+    # Create train and validation datasets
+    train_dataset = LLMDataset(
+        llm_interface=llm_interface,
+        prompts=train_prompts,
+        size=config['training'].get('train_size', 1000),
+        mode='train'
+    )
+    
+    val_dataset = LLMDataset(
+        llm_interface=llm_interface,
+        prompts=val_prompts,
+        size=config['training'].get('val_size', 200),
+        mode='val'
+    )
+    
+    return train_dataset, val_dataset
+
 def main(args):
     """Main training function."""
     # Load configuration
@@ -201,85 +305,55 @@ def main(args):
     torch.manual_seed(config['general']['seed'])
     np.random.seed(config['general']['seed'])
     
-    # Create directories
-    os.makedirs(config['general']['log_dir'], exist_ok=True)
-    os.makedirs(config['general']['checkpoint_dir'], exist_ok=True)
+    # Create datasets and dataloaders
+    train_dataset, val_dataset = create_datasets(config)
+    batch_size = config['training'].get('batch_size', 32)
+    
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=config['training'].get('num_workers', 2)
+    )
+    
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=config['training'].get('num_workers', 2)
+    )
     
     # Set up model
     model = setup_model(config)
     model.to(device)
-    print(f"Model created with {sum(p.numel() for p in model.parameters())} parameters")
     
     # Set up optimizer and scheduler
     optimizer, scheduler = setup_optimizer(model, config)
     
-    # Set up LLM interface if enabled
-    llm_interface = None
-    if args.use_llm:
-        provider = config['llm'].get('provider', 'openai')
-        provider_config = config['llm'].get(provider, {})
-        
-        llm_interface = LLMInterface(
-            api_endpoint=config['llm'].get('api_endpoint', ''),
-            model_name=provider_config.get('model_name', config['llm']['model_name']),
-            max_tokens=config['llm'].get('max_tokens', 1024),
-            temperature=config['llm'].get('temperature', 0.7),
-            provider=provider,
-            api_key=provider_config.get('api_key', None),
-            embedding_dim=config['llm'].get('embedding_dim', 768)
-        )
-        print(f"LLM interface initialized with {provider} provider")
-    
-    # TODO: Load dataset
-    # For now, we'll use dummy data
-    # In a real implementation, you would load your actual dataset here
-    
     # Training loop
-    num_epochs = config['training']['num_epochs']
-    for epoch in range(1, num_epochs + 1):
-        # Train epoch
+    for epoch in range(1, config['training']['num_epochs'] + 1):
+        print(f"\nEpoch {epoch}/{config['training']['num_epochs']}")
+        
+        # Train for one epoch
         train_loss = train_epoch(model, train_dataloader, optimizer, device, epoch)
-        print(f"Epoch {epoch}/{num_epochs}, Train Loss: {train_loss:.6f}")
+        print(f"Train loss: {train_loss:.4f}")
         
         # Validate
         val_loss = validate(model, val_dataloader, device)
-        print(f"Epoch {epoch}/{num_epochs}, Validation Loss: {val_loss:.6f}")
+        print(f"Validation loss: {val_loss:.4f}")
         
-        # LLM validation if enabled
-        if args.use_llm and llm_interface is not None and epoch % args.llm_validation_interval == 0:
-            # Get validation prompts from config
-            validation_prompts = config['llm'].get('validation', {}).get('prompts', [
-                "Explain how neural networks process information similar to the human brain.",
-                "Describe the role of neuromodulators in learning and memory."
-            ])
-            
-            # Run LLM validation
-            llm_score, llm_results = llm_validation(model, llm_interface, validation_prompts, device)
-            print(f"Epoch {epoch}/{num_epochs}, LLM Validation Score: {llm_score:.4f}")
-            
-            # Log LLM validation results
-            for i, result in enumerate(llm_results):
-                print(f"  Prompt {i+1} Score: {result['evaluation']['score']:.2f}")
-        
-        # Update scheduler
-        if scheduler is not None:
-            scheduler.step()
+        # LLM validation
+        if args.use_llm and epoch % args.llm_validation_interval == 0:
+            llm_val_loss = llm_validation(model, llm_interface, val_dataset.prompts, device)
+            print(f"LLM Validation loss: {llm_val_loss:.4f}")
         
         # Save checkpoint
         if epoch % args.checkpoint_interval == 0:
-            save_checkpoint(
-                model, optimizer, epoch, val_loss, config, 
-                config['general']['checkpoint_dir']
-            )
-    
-    # Save final model
-    final_checkpoint_path = os.path.join(config['general']['checkpoint_dir'], "final_model.pt")
-    torch.save({
-        'model_state_dict': model.state_dict(),
-        'config': config
-    }, final_checkpoint_path)
-    print(f"Final model saved to {final_checkpoint_path}")
-
+            save_checkpoint(model, optimizer, epoch, val_loss, config, "checkpoints")
+        
+        # Step the scheduler
+        if scheduler is not None:
+            scheduler.step()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Brain-Inspired Neural Network")
