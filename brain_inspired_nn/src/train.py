@@ -6,20 +6,25 @@ including data loading, training loop, and LLM integration for validation.
 """
 
 import os
+import sys
 import yaml
 import argparse
 import numpy as np
 from tqdm import tqdm
 
+# Add the project root directory to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
+import yfinance as yf
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-from model import BrainInspiredNN
-from utils.llm_interface import LLMInterface
-
-# Example using PyTorch
+# Critical fix: Use proper module paths
+from src.model import BrainInspiredNN
 
 class LLMInterface:
     def __init__(self, config):
