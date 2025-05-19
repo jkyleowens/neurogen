@@ -86,7 +86,7 @@ class BrainInspiredNN(nn.Module):
         
         # GRU layer replacing the neuromodulator
         self.intermediate_gru = nn.GRU(
-            input_size=self.hidden_size + self.output_size,  # Controller output + output segment
+            input_size=self.hidden_size + self.input_size,  # Controller output + input segment
             hidden_size=self.hidden_size,
             num_layers=1,
             batch_first=True
@@ -107,6 +107,9 @@ class BrainInspiredNN(nn.Module):
         self.register_buffer('neuron_health', torch.ones(self.hidden_size))
         self.register_buffer('neuron_mask', torch.ones(self.hidden_size))
         
+        # Learning rate for neuromodulator-driven weight updates (from training config)
+        self.learning_rate = config.get('training', {}).get('learning_rate', 1e-3)
+
         # Initialize hidden states
         self.hidden = None
         self.neurotransmitter_levels = None

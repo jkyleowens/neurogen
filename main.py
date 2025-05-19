@@ -54,7 +54,11 @@ def main():
     model.to(device)
 
     # Optimizer and loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=config['training']['learning_rate'])
+    # Remove optimizer if learning via neuromodulator only
+    if config.get('learning_mode', '') == 'neuromodulator':
+        optimizer = None
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=config['training']['learning_rate'])
     criterion = torch.nn.MSELoss()
 
     # Training + Validation
