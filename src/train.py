@@ -126,7 +126,14 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
         
         # Update weights
         optimizer.step()
-        
+        # Detach hidden state and persistent memory to truncate computation graph
+        if hasattr(model, 'hidden') and isinstance(model.hidden, dict):
+            h = model.hidden.get('hidden')
+            pm = model.hidden.get('persistent_memory')
+            if h is not None:
+                model.hidden['hidden'] = h.detach()
+            if pm is not None:
+                model.hidden['persistent_memory'] = pm.detach()
         # Accumulate loss
         total_loss += loss.item()
     
