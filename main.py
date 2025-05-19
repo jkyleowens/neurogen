@@ -39,7 +39,7 @@ def main():
     if os.path.exists(args.model_path):
         checkpoint = torch.load(args.model_path, map_location=device)
         model = BrainInspiredNN.setup_model(config, input_shape=train_ds[0][0].shape)
-        model.load_state_dict(checkpoint.get('state_dict', checkpoint))
+        model.load_state_dict(checkpoint.get('state_dict', checkpoint), strict=False)
         print("Loaded existing model checkpoint.")
     else:
         model = BrainInspiredNN.setup_model(config, input_shape=train_ds[0][0].shape)
@@ -64,7 +64,7 @@ def main():
 
     # Load best model for testing
     checkpoint = torch.load(args.model_path, map_location=device)
-    model.load_state_dict(checkpoint['state_dict'])
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
 
     # Testing
     test_loss = validate(model, test_loader, criterion, device)
