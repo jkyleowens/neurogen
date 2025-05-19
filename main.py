@@ -1,80 +1,79 @@
+#!/usr/bin/env python
 import argparse
 import yaml
 import torch
 import os
-from src.train import train_epoch
-from src.model import BrainInspiredNN as Model
-from src.controller.persistent_gru import PersistentGRUController
 from torch.utils.data import DataLoader
-from data_loader import create_datasets  # Assume this is implemented for yfinance data
+from src.train import train_epoch, validate
+from src.model import BrainInspiredNN
+from data_loader import create_datasets
 from src.utils.performance_report import generate_performance_report
 
 
 def main():
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Train, validate, and test the model.")
-    parser.add_argument("--epochs", type=int, required=True, help="Number of epochs for training.")
+    parser = argparse.ArgumentParser(description="Train, validate, and test the BrainInspiredNN model.")
+    parser.add_argument('--epochs', type=int, required=True, help='Number of training epochs')
+    parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file')
+    parser.add_argument('--model-path', type=str, default='models/best_model.pt', help='Path to save/load model')
     args = parser.parse_args()
 
     # Load configuration
-    config_path = "config/config.yaml"
-    with open(config_path, "r") as file:
-        config = yaml.safe_load(file)
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
 
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Device
+    device = torch.device(config.get('general', {}).get('device', 'cpu'))
     print(f"Using device: {device}")
 
-    # Load datasets
-    train_dataset, val_dataset, test_dataset = create_datasets(config)
-    train_loader = DataLoader(train_dataset, batch_size=config['training']['batch_size'], shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=config['training']['batch_size'], shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=config['training']['batch_size'], shuffle=False)
+    # Data loaders
+    train_ds, val_ds, test_ds = create_datasets(config)
+    batch_size = config['training']['batch_size']
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
 
-    # Load model
-    model_path = "models/best_model.pt"
-    if os.path.exists(model_path):
-        checkpoint = torch.load(model_path, map_location=device)
-        if isinstance(checkpoint, dict):
-            # If checkpoint is state_dict or dict containing 'state_dict'
-            model = Model(config)
-            state_dict = checkpoint.get('state_dict', checkpoint)
-            model.load_state_dict(state_dict)
-        else:
-            # Loaded a full model instance
-            model = checkpoint
-        print("Loaded pre-trained model.")
+    # Model
+    best_model = None
+    best_val_loss = float('inf')
+    # Initialize or load
+    if os.path.exists(args.model_path):
+        checkpoint = torch.load(args.model_path, map_location=device)
+        model = BrainInspiredNN.setup_model(config, input_shape=train_ds[0][0].shape)
+        model.load_state_dict(checkpoint.get('state_dict', checkpoint))
+        print("Loaded existing model checkpoint.")
     else:
-        model = Model(config)
+        model = BrainInspiredNN.setup_model(config, input_shape=train_ds[0][0].shape)
         print("Initialized new model.")
     model.to(device)
 
-    # Optimizer and loss function
+    # Optimizer and loss
     optimizer = torch.optim.Adam(model.parameters(), lr=config['training']['learning_rate'])
     criterion = torch.nn.MSELoss()
 
-    # Training loop
-    for epoch in range(args.epochs):
-        print(f"Epoch {epoch + 1}/{args.epochs}")
+    # Training + Validation
+    for epoch in range(1, args.epochs + 1):
+        print(f"\nEpoch {epoch}/{args.epochs}")
         train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
-        print(f"Training Loss: {train_loss:.4f}")
+        val_loss = validate(model, val_loader, criterion, device)
+        print(f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+        # Checkpoint
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save({'state_dict': model.state_dict()}, args.model_path)
+            print(f"Saved new best model (Val Loss: {best_val_loss:.4f})")
 
-    # Validation
-    val_loss = train_epoch(model, val_loader, optimizer, criterion, device, train=False)
-    print(f"Validation Loss: {val_loss:.4f}")
+    # Load best model for testing
+    checkpoint = torch.load(args.model_path, map_location=device)
+    model.load_state_dict(checkpoint['state_dict'])
 
     # Testing
-    test_loss = train_epoch(model, test_loader, optimizer, criterion, device, train=False)
-    print(f"Test Loss: {test_loss:.4f}")
+    test_loss = validate(model, test_loader, criterion, device)
+    print(f"\nTest Loss: {test_loss:.4f}")
 
-    # Save the model
-    torch.save(model, model_path)
-    print(f"Model saved to {model_path}")
-
-    # Generate performance report
-    generate_performance_report(train_loss, val_loss, test_loss, output_dir="docs/")
-    print("Performance report generated in docs/ directory.")
+    # Performance report
+    generate_performance_report(train_loss, best_val_loss, test_loss, output_dir='docs/')
+    print("Performance report available in docs/")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
