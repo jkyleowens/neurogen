@@ -69,18 +69,24 @@ def create_datasets(config):
     val_ratio = config['data']['val_ratio']
     # Download and preprocess
     df = yf.download(ticker, auto_adjust=True)[features].dropna()
-    if config['data'].get('normalize', False):
-        means = df.mean()
-        stds = df.std().replace(0, 1)
-        df = (df - means) / stds
     data = df.values
     # Compute split indices
     total = len(data)
     train_end = int(total * train_ratio)
     val_end = train_end + int(total * val_ratio)
+
+    # Split data
     train_data = data[:train_end]
     val_data = data[train_end:val_end]
     test_data = data[val_end:]
+
+    # Normalize using training data statistics
+    if config['data'].get('normalize', False):
+        means = train_data.mean(axis=0)
+        stds = train_data.std(axis=0).replace(0, 1)
+        train_data = (train_data - means) / stds
+        val_data = (val_data - means) / stds
+        test_data = (test_data - means) / stds
     # Create RandomWindowDataset for train/val
     train_samples = config['data'].get('train_samples', max(1, len(train_data) - sequence_length))
     val_samples = config['data'].get('val_samples', max(1, len(val_data) - sequence_length))

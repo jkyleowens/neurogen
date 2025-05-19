@@ -232,6 +232,16 @@ def main():
     best_val_loss = float('inf')
     epochs_without_improvement = 0
 
+    # Add code to track and display the number of neurons
+    num_neurons = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Number of trainable neurons: {num_neurons}")
+
+    # Modify training loop to calculate and display accuracy
+    def calculate_accuracy(output, target):
+        """Calculate accuracy for regression by checking closeness."""
+        threshold = config['training'].get('accuracy_threshold', 0.1)
+        return (torch.abs(output - target) < threshold).float().mean().item()
+
     for epoch in range(start_epoch, num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
         
@@ -242,8 +252,14 @@ def main():
         # Validate
         val_loss = validate(model, val_loader, criterion, device)
         val_losses.append(val_loss)
-        
-        print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+        # Calculate training and validation accuracy
+        train_accuracy = calculate_accuracy(model(torch.cat([data for data, _ in train_loader]).to(device)),
+                                            torch.cat([target for _, target in train_loader]).to(device))
+        val_accuracy = calculate_accuracy(model(torch.cat([data for data, _ in val_loader]).to(device)),
+                                          torch.cat([target for _, target in val_loader]).to(device))
+
+        print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Train Acc: {train_accuracy:.4f}, Val Acc: {val_accuracy:.4f}")
 
         # Check for early stopping
         if val_loss < best_val_loss:
@@ -287,9 +303,11 @@ def main():
     plt.savefig('loss_plot.png')
     print("Loss plot saved to loss_plot.png")
     
-    # Testing
+    # Testing performance
     test_loss = validate(model, test_loader, criterion, device)
-    print(f"Test Loss: {test_loss:.4f}")
+    test_accuracy = calculate_accuracy(model(torch.cat([data for data, _ in test_loader]).to(device)),
+                                       torch.cat([target for _, target in test_loader]).to(device))
+    print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
     
     # Performance report
     generate_performance_report(train_losses[-1], val_losses[-1], test_loss, output_dir='docs/')
