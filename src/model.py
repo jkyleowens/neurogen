@@ -108,7 +108,7 @@ class BrainInspiredNN(nn.Module):
         self.register_buffer('neuron_mask', torch.ones(self.hidden_size))
         
         # Learning rate for neuromodulator-driven weight updates (from training config)
-        self.learning_rate = config.get('training', {}).get('learning_rate', 1e-3)
+        self.learning_rate = self.config.get('training', {}).get('learning_rate', 1e-3)
 
         # Initialize hidden states
         self.hidden = None
