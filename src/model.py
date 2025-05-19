@@ -97,6 +97,8 @@ class BrainInspiredNN(nn.Module):
         
         # Output layer
         self.output_layer = nn.Linear(self.hidden_size, self.output_size)
+        # Dropout for regularization
+        self.dropout_layer = nn.Dropout(self.dropout)
         
         # Initialize hidden states
         self.hidden = None
@@ -129,8 +131,9 @@ class BrainInspiredNN(nn.Module):
         else:
             final_hidden = controller_output
         
-        # Project to output
-        output = self.output_layer(final_hidden)
+        # Apply dropout then project to output
+        out_hidden = self.dropout_layer(final_hidden)
+        output = self.output_layer(out_hidden)
         return output
     
     def init_hidden(self, batch_size, device):

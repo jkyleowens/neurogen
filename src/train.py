@@ -98,10 +98,14 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
     Returns:
         float: Average training loss
     """
+    # Reset model state at start of epoch
+    model.reset_state()
     model.train()
     total_loss = 0.0
     
     for batch_idx, (data, target) in enumerate(tqdm(train_loader, desc='Training')):
+        # Reset hidden/persistent memory for each independent window
+        model.reset_state()
         data, target = data.to(device), target.to(device)
         
         # Zero gradients
@@ -153,6 +157,8 @@ def validate(model, val_loader, criterion, device):
     Returns:
         float: Average validation loss
     """
+    # Reset model state before validation
+    model.reset_state()
     model.eval()
     total_loss = 0.0
     
