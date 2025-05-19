@@ -28,8 +28,8 @@ def main():
     config['model']['input_size'] = feature_count
     config['model']['output_size'] = feature_count
 
-    # Device
-    device = torch.device(config.get('general', {}).get('device', 'cpu'))
+    # Device (use GPU if available)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
     # Data loaders
