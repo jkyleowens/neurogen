@@ -21,6 +21,13 @@ def main():
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
 
+    # Ensure model dims match data features
+    feature_count = len(config['data'].get('features', []))
+    if 'model' not in config:
+        config['model'] = {}
+    config['model']['input_size'] = feature_count
+    config['model']['output_size'] = feature_count
+
     # Device
     device = torch.device(config.get('general', {}).get('device', 'cpu'))
     print(f"Using device: {device}")

@@ -187,14 +187,11 @@ class BrainInspiredNN(nn.Module):
         input_size = input_shape[-1] if len(input_shape) > 1 else input_shape[0]
         
         # Get model parameters from config
-        if 'model' in config:
-            model_config = config['model']
-            hidden_size = model_config.get('hidden_size', 128)
-            output_size = model_config.get('output_size', 1)
-        else:
-            hidden_size = config.get('hidden_size', 128)
-            output_size = config.get('output_size', 1)
-            
+        model_config = config.get('model', {})
+        hidden_size = model_config.get('hidden_size', 128)
+        # Default output_size to input_size (feature count) if not explicitly set
+        output_size = model_config.get('output_size', input_size)
+        
         # Get controller parameters
         controller_config = config.get('controller', {})
         persistent_memory_size = controller_config.get('persistent_memory_size', 64)

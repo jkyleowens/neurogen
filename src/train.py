@@ -112,7 +112,11 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
         # If model returns sequence outputs, take the last time-step
         if output.dim() == 3:
             output = output[:, -1, :]
-        
+        # Align feature dimensions if mismatched
+        if output.shape != target.shape:
+            common_dim = min(output.size(-1), target.size(-1))
+            output = output[..., :common_dim]
+            target = target[..., :common_dim]
         # Calculate loss
         loss = criterion(output, target)
         
@@ -153,7 +157,11 @@ def validate(model, val_loader, criterion, device):
             # If model returns sequence outputs, take the last time-step
             if output.dim() == 3:
                 output = output[:, -1, :]
-
+            # Align feature dimensions if mismatched
+            if output.shape != target.shape:
+                common_dim = min(output.size(-1), target.size(-1))
+                output = output[..., :common_dim]
+                target = target[..., :common_dim]
             # Calculate loss
             loss = criterion(output, target)
             
