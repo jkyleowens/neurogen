@@ -34,7 +34,15 @@ def main():
     # Load model
     model_path = "models/best_model.pt"
     if os.path.exists(model_path):
-        model = torch.load(model_path)
+        checkpoint = torch.load(model_path, map_location=device)
+        if isinstance(checkpoint, dict):
+            # If checkpoint is state_dict or dict containing 'state_dict'
+            model = Model(config)
+            state_dict = checkpoint.get('state_dict', checkpoint)
+            model.load_state_dict(state_dict)
+        else:
+            # Loaded a full model instance
+            model = checkpoint
         print("Loaded pre-trained model.")
     else:
         model = Model(config)
