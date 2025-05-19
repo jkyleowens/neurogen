@@ -25,8 +25,9 @@ import yfinance as yf
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 # Import the model
-from model import BrainInspiredNN
-from utils.memory_utils import optimize_memory_usage, print_gpu_memory_status
+from src.model import BrainInspiredNN  # Ensure correct import for the model
+from src.utils.memory_utils import optimize_memory_usage, print_gpu_memory_status  # Ensure utility imports
+from src.utils.performance_report import generate_performance_report  # Add performance report utility
 
 def parse_args():
     """Parse command line arguments."""
@@ -236,5 +237,6 @@ def main():
     
     print("Training completed!")
 
+# Ensure the main function is complete and properly structured
 if __name__ == "__main__":
     main()
