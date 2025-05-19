@@ -139,8 +139,10 @@ class BrainInspiredNN(nn.Module):
             return output
         except Exception as e:
             print(f"Error in forward pass: {e}")
-            # Emergency fallback
-            return torch.zeros((x.size(0), self.output_size), device=x.device)
+            # Emergency fallback: zero tensor with grad enabled
+            out = torch.zeros((x.size(0), self.output_size), device=x.device)
+            out.requires_grad_(True)
+            return out
         
     def init_hidden(self, batch_size, device):
         """
