@@ -33,7 +33,7 @@ class YFinanceDataset(Dataset):
 
 def create_datasets(config):
     """
-    Create train, validation, and test TensorDatasets from Yahoo Finance data.
+    Create train, validation, and test datasets and dataloaders.
     """
     # Configuration keys
     ticker = config['data']['ticker_symbol']
@@ -42,8 +42,12 @@ def create_datasets(config):
     val_ratio = config['data']['val_ratio']
     features = config['data'].get('features', ['Close'])
     # Download full history
-    df = yf.download(ticker, auto_adjust=True)
-    df = df[features].dropna()
+    df = yf.download(ticker, auto_adjust=True)[features].dropna()
+    # Normalize data if requested
+    if config['data'].get('normalize', False):
+        means = df.mean()
+        stds = df.std().replace(0, 1)
+        df = (df - means) / stds
 
     # Build sequences and targets
     data = df.values
