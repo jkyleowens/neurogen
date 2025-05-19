@@ -40,40 +40,33 @@ class BrainInspiredNN(nn.Module):
                  acetylcholine_scale=None,
                  reward_decay=None,
                  config=None):
-        """
-        Initialize the Brain-Inspired Neural Network.
-        
-        Args:
-            input_size (int): Size of input features
-            hidden_size (int): Size of hidden layers
-            output_size (int): Size of output features
-            persistent_memory_size (int): Size of persistent memory
-            num_layers (int): Number of GRU layers
-            dropout (float): Dropout rate
-            dopamine_scale (float): Scale factor for dopamine
-            serotonin_scale (float): Scale factor for serotonin
-            norepinephrine_scale (float): Scale factor for norepinephrine
-            acetylcholine_scale (float): Scale factor for acetylcholine
-            reward_decay (float): Decay rate for reward signals
-            config (dict): Configuration parameters for the model
-        """
+        """Initialize the Brain-Inspired Neural Network."""
         super(BrainInspiredNN, self).__init__()
-        
-        # Use config if provided, otherwise use individual parameters
+        # Allow passing config dict as first positional argument
+        if config is None and isinstance(input_size, dict):
+            config = input_size
+        # Use nested config fields if config provided
         if config is not None:
             self.config = config
-            self.input_size = config.get('input_size', 10)
-            self.hidden_size = config.get('hidden_size', 128)
-            self.output_size = config.get('output_size', 1)
-            self.persistent_memory_size = config.get('persistent_memory_size', 64)
-            self.num_layers = config.get('num_layers', 2)
-            self.dropout = config.get('dropout', 0.2)
-            self.dopamine_scale = config.get('dopamine_scale', 1.0)
-            self.serotonin_scale = config.get('serotonin_scale', 1.0)
-            self.norepinephrine_scale = config.get('norepinephrine_scale', 1.0)
-            self.acetylcholine_scale = config.get('acetylcholine_scale', 1.0)
-            self.reward_decay = config.get('reward_decay', 0.95)
+            # Model params
+            model_conf = config.get('model', {})
+            self.input_size = model_conf.get('input_size', 10)
+            self.hidden_size = model_conf.get('hidden_size', 128)
+            self.output_size = model_conf.get('output_size', 1)
+            # Controller params
+            ctrl_conf = config.get('controller', {})
+            self.persistent_memory_size = ctrl_conf.get('persistent_memory_size', 64)
+            self.num_layers = ctrl_conf.get('num_layers', 2)
+            self.dropout = ctrl_conf.get('dropout', 0.2)
+            # Neuromodulator params
+            neu_conf = config.get('neuromodulator', {})
+            self.dopamine_scale = neu_conf.get('dopamine_scale', 1.0)
+            self.serotonin_scale = neu_conf.get('serotonin_scale', 1.0)
+            self.norepinephrine_scale = neu_conf.get('norepinephrine_scale', 1.0)
+            self.acetylcholine_scale = neu_conf.get('acetylcholine_scale', 1.0)
+            self.reward_decay = neu_conf.get('reward_decay', 0.95)
         else:
+            # Use explicit parameters
             self.input_size = input_size
             self.hidden_size = hidden_size
             self.output_size = output_size
@@ -85,22 +78,10 @@ class BrainInspiredNN(nn.Module):
             self.norepinephrine_scale = norepinephrine_scale
             self.acetylcholine_scale = acetylcholine_scale
             self.reward_decay = reward_decay
-            self.config = {
-                'input_size': self.input_size,
-                'hidden_size': self.hidden_size,
-                'output_size': self.output_size,
-                'persistent_memory_size': self.persistent_memory_size,
-                'num_layers': self.num_layers,
-                'dropout': self.dropout,
-                'dopamine_scale': self.dopamine_scale,
-                'serotonin_scale': self.serotonin_scale,
-                'norepinephrine_scale': self.norepinephrine_scale,
-                'acetylcholine_scale': self.acetylcholine_scale,
-                'reward_decay': self.reward_decay
-            }
-        
+            self.config = config or {}
+
         # Initialize controller (GRU-based)
-        self.controller = PersistentGRU(
+        self.controller = PersistentGRUController(
             input_size=self.input_size,
             hidden_size=self.hidden_size,
             persistent_memory_size=self.persistent_memory_size,
@@ -202,13 +183,6 @@ class BrainInspiredNN(nn.Module):
     def setup_model(config, input_shape):
         """
         Set up a model instance based on configuration.
-        
-        Args:
-            config (dict): Configuration parameters
-            input_shape (tuple): Shape of input data
-            
-        Returns:
-            BrainInspiredNN: Initialized model
         """
         input_size = input_shape[-1] if len(input_shape) > 1 else input_shape[0]
         
