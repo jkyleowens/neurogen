@@ -11,7 +11,6 @@ import torch.nn.functional as F
 
 # Import from project structure
 from src.controller.persistent_gru import PersistentGRUController
-from src.neuromodulator.reward_modulator import RewardModulator
 from src.utils.memory_utils import optimize_memory_usage, print_gpu_memory_status
 from src.utils.reset_model_state import reset_model_state
 
@@ -85,14 +84,12 @@ class BrainInspiredNN(nn.Module):
             dropout=self.dropout
         )
         
-        # Initialize neuromodulator
-        self.neuromodulator = RewardModulator(
+        # GRU layer replacing the neuromodulator
+        self.intermediate_gru = nn.GRU(
+            input_size=self.hidden_size + self.output_size,  # Controller output + output segment
             hidden_size=self.hidden_size,
-            dopamine_scale=self.dopamine_scale,
-            serotonin_scale=self.serotonin_scale,
-            norepinephrine_scale=self.norepinephrine_scale,
-            acetylcholine_scale=self.acetylcholine_scale,
-            reward_decay=self.reward_decay
+            num_layers=1,
+            batch_first=True
         )
         
         # Output layer
@@ -101,6 +98,14 @@ class BrainInspiredNN(nn.Module):
         self.dropout_layer = nn.Dropout(self.dropout)
         # Batch normalization layer
         self.batch_norm = nn.BatchNorm1d(self.hidden_size)
+        
+        # Health and pruning parameters for neuron death
+        health_conf = config.get('neuron_health', {}) if config else {}
+        self.health_decay = health_conf.get('health_decay', 0.99)
+        self.death_threshold = health_conf.get('death_threshold', 0.1)
+        # Initialize neuron health and mask buffers
+        self.register_buffer('neuron_health', torch.ones(self.hidden_size))
+        self.register_buffer('neuron_mask', torch.ones(self.hidden_size))
         
         # Initialize hidden states
         self.hidden = None
@@ -117,34 +122,52 @@ class BrainInspiredNN(nn.Module):
         Returns:
             torch.Tensor: Output tensor
         """
+        # Modify forward pass to support feedback-driven learning
         # Apply controller and retain hidden state
         controller_output, hidden_dict = self.controller(x, self.hidden)
         self.hidden = hidden_dict
 
-        # Apply batch normalization
-        if controller_output.dim() == 3:
-            # Reshape for batch normalization (batch, hidden, seq)
-            controller_output = controller_output.permute(0, 2, 1)
-            controller_output = self.batch_norm(controller_output)
-            controller_output = controller_output.permute(0, 2, 1)
-        else:
-            controller_output = self.batch_norm(controller_output)
-
-        # Apply neuromodulation if reward is provided
-        if reward is not None:
-            controller_output, self.neurotransmitter_levels = self.neuromodulator(
-                controller_output, reward, self.neurotransmitter_levels
-            )
-        
         # If output is sequence (batch, seq, hidden), take last time step
         if controller_output.dim() == 3:
             final_hidden = controller_output[:, -1, :]
         else:
             final_hidden = controller_output
-        
+
+        # Concatenate controller output and input segments
+        input_to_gru = torch.cat((final_hidden.unsqueeze(1), x), dim=-1)
+
+        # Pass through the intermediate GRU
+        gru_output, _ = self.intermediate_gru(input_to_gru)
+
+        # Take the last time step of GRU output
+        final_gru_output = gru_output[:, -1, :]
+
+        # Neuromodulator-driven feedback adjustment
+        if reward is not None:
+            feedback_signal = reward.unsqueeze(1) * final_gru_output
+            final_gru_output = final_gru_output + feedback_signal
+
+            # Update neuron health based on feedback magnitude
+            with torch.no_grad():
+                effect = torch.mean(torch.abs(feedback_signal), dim=0)
+                self.neuron_health = self.neuron_health * self.health_decay + effect * (1 - self.health_decay)
+                # Update mask: neurons below threshold die
+                self.neuron_mask = (self.neuron_health > self.death_threshold).float()
+
+        # Apply neuron mask to prune dead neurons
+        final_gru_output = final_gru_output * self.neuron_mask
+
         # Apply dropout then project to output
-        out_hidden = self.dropout_layer(final_hidden)
+        out_hidden = self.dropout_layer(final_gru_output)
         output = self.output_layer(out_hidden)
+
+        # Neuromodulator-driven weight update (output layer)
+        if reward is not None:
+            with torch.no_grad():
+                delta = (reward.view(-1) * final_gru_output).mean(dim=0)
+                self.output_layer.weight.data += self.learning_rate * delta.unsqueeze(0)
+                self.output_layer.bias.data += self.learning_rate * reward.mean()
+
         return output
     
     def init_hidden(self, batch_size, device):

@@ -98,50 +98,26 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
     Returns:
         float: Average training loss
     """
-    # Reset model state at start of epoch
+    # Removing traditional backpropagation; learning via neuromodulation
     model.reset_state()
     model.train()
     total_loss = 0.0
-    
+
     for batch_idx, (data, target) in enumerate(tqdm(train_loader, desc='Training')):
-        # Reset hidden/persistent memory for each independent window
-        model.reset_state()
         data, target = data.to(device), target.to(device)
-        
-        # Zero gradients
-        optimizer.zero_grad()
-        
+
         # Forward pass
         output = model(data)
-        # If model returns sequence outputs, take the last time-step
-        if output.dim() == 3:
-            output = output[:, -1, :]
-        # Align feature dimensions if mismatched
-        if output.shape != target.shape:
-            print(f"[DEBUG train_epoch] Shape mismatch - output: {output.shape}, target: {target.shape}")
-            common_dim = min(output.size(-1), target.size(-1))
-            output = output[..., :common_dim]
-            target = target[..., :common_dim]
-        # Calculate loss
-        loss = criterion(output, target)
-        
-        # Backward pass
-        loss.backward()
-        
-        # Update weights
-        optimizer.step()
-        # Detach hidden state and persistent memory to truncate computation graph
-        if hasattr(model, 'hidden') and isinstance(model.hidden, dict):
-            h = model.hidden.get('hidden')
-            pm = model.hidden.get('persistent_memory')
-            if h is not None:
-                model.hidden['hidden'] = h.detach()
-            if pm is not None:
-                model.hidden['persistent_memory'] = pm.detach()
-        # Accumulate loss
-        total_loss += loss.item()
-    
-    # Return average loss
+
+        # Compute reward signal (negative loss)
+        reward = -criterion(output, target).detach()
+
+        # Neuromodulator-driven update during forward
+        model(data, reward=reward)
+
+        # Accumulate loss for monitoring
+        total_loss += criterion(output, target).item()
+
     return total_loss / len(train_loader)
 
 def validate(model, val_loader, criterion, device):
@@ -242,26 +218,39 @@ def main():
         threshold = config['training'].get('accuracy_threshold', 0.1)
         return (torch.abs(output - target) < threshold).float().mean().item()
 
+    # Modify training loop to remove backpropagation and integrate neuromodulator-driven updates
     for epoch in range(start_epoch, num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
-        
-        # Train
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
+
+        model.reset_state()
+        model.train()
+        total_loss = 0.0
+
+        for batch_idx, (data, target) in enumerate(tqdm(train_loader, desc='Training')):
+            data, target = data.to(device), target.to(device)
+
+            # Forward pass
+            output = model(data)
+
+            # Calculate reward signal (e.g., negative loss as reward)
+            reward = -criterion(output, target).detach()
+
+            # Update model using neuromodulator-driven feedback
+            model(data, reward=reward)
+
+            # Accumulate loss for monitoring
+            total_loss += criterion(output, target).item()
+
+        train_loss = total_loss / len(train_loader)
         train_losses.append(train_loss)
-        
+
         # Validate
         val_loss = validate(model, val_loader, criterion, device)
         val_losses.append(val_loss)
 
-        # Calculate training and validation accuracy
-        train_accuracy = calculate_accuracy(model(torch.cat([data for data, _ in train_loader]).to(device)),
-                                            torch.cat([target for _, target in train_loader]).to(device))
-        val_accuracy = calculate_accuracy(model(torch.cat([data for data, _ in val_loader]).to(device)),
-                                          torch.cat([target for _, target in val_loader]).to(device))
+        print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
-        print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Train Acc: {train_accuracy:.4f}, Val Acc: {val_accuracy:.4f}")
-
-        # Check for early stopping
+        # Early stopping check
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_without_improvement = 0
@@ -272,42 +261,9 @@ def main():
             print(f"Early stopping triggered after {epoch+1} epochs.")
             break
 
-        # Step the scheduler based on validation loss
-        scheduler.step(val_loss)
-
-        # Optimize memory usage
-        optimize_memory_usage(model, device)
-
-        # Save checkpoint
-        checkpoint_path = f"checkpoints/model_epoch_{epoch+1}.pt"
-        os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'train_loss': train_loss,
-            'val_loss': val_loss,
-            'config': config
-        }, checkpoint_path)
-        
-        print(f"Checkpoint saved to {checkpoint_path}")
-    
-    # Plot training and validation losses
-    plt.figure(figsize=(10, 5))
-    plt.plot(train_losses, label='Train Loss')
-    plt.plot(val_losses, label='Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Losses')
-    plt.legend()
-    plt.savefig('loss_plot.png')
-    print("Loss plot saved to loss_plot.png")
-    
     # Testing performance
     test_loss = validate(model, test_loader, criterion, device)
-    test_accuracy = calculate_accuracy(model(torch.cat([data for data, _ in test_loader]).to(device)),
-                                       torch.cat([target for _, target in test_loader]).to(device))
-    print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
+    print(f"Test Loss: {test_loss:.4f}")
     
     # Performance report
     generate_performance_report(train_losses[-1], val_losses[-1], test_loss, output_dir='docs/')
