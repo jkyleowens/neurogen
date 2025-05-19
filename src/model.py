@@ -99,6 +99,8 @@ class BrainInspiredNN(nn.Module):
         self.output_layer = nn.Linear(self.hidden_size, self.output_size)
         # Dropout for regularization
         self.dropout_layer = nn.Dropout(self.dropout)
+        # Batch normalization layer
+        self.batch_norm = nn.BatchNorm1d(self.hidden_size)
         
         # Initialize hidden states
         self.hidden = None
@@ -118,7 +120,16 @@ class BrainInspiredNN(nn.Module):
         # Apply controller and retain hidden state
         controller_output, hidden_dict = self.controller(x, self.hidden)
         self.hidden = hidden_dict
-        
+
+        # Apply batch normalization
+        if controller_output.dim() == 3:
+            # Reshape for batch normalization (batch, hidden, seq)
+            controller_output = controller_output.permute(0, 2, 1)
+            controller_output = self.batch_norm(controller_output)
+            controller_output = controller_output.permute(0, 2, 1)
+        else:
+            controller_output = self.batch_norm(controller_output)
+
         # Apply neuromodulation if reward is provided
         if reward is not None:
             controller_output, self.neurotransmitter_levels = self.neuromodulator(

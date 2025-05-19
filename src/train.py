@@ -206,7 +206,12 @@ def main():
     
     # Define loss function and optimizer
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'])
+    # Add weight decay to the optimizer and a learning rate scheduler
+    weight_decay = config['training'].get('weight_decay', 0.0)
+    optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'], weight_decay=weight_decay)
+
+    # Define learning rate scheduler
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
     
     # Resume from checkpoint if specified
     start_epoch = 0
@@ -222,6 +227,11 @@ def main():
     train_losses = []
     val_losses = []
     
+    # Add early stopping mechanism
+    early_stopping_patience = config['training'].get('early_stopping_patience', 50)
+    best_val_loss = float('inf')
+    epochs_without_improvement = 0
+
     for epoch in range(start_epoch, num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
         
@@ -234,10 +244,24 @@ def main():
         val_losses.append(val_loss)
         
         print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-        
+
+        # Check for early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+
+        if epochs_without_improvement >= early_stopping_patience:
+            print(f"Early stopping triggered after {epoch+1} epochs.")
+            break
+
+        # Step the scheduler based on validation loss
+        scheduler.step(val_loss)
+
         # Optimize memory usage
         optimize_memory_usage(model, device)
-        
+
         # Save checkpoint
         checkpoint_path = f"checkpoints/model_epoch_{epoch+1}.pt"
         os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)

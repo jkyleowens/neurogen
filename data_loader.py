@@ -34,11 +34,13 @@ class YFinanceDataset(Dataset):
 
 class RandomWindowDataset(Dataset):
     """Samples random windows of fixed sequence_length from data array."""
-    def __init__(self, data, seq_len, sample_count):
+    def __init__(self, data, seq_len, sample_count, augment=False, noise_std=0.01):
         self.data = data
         self.seq_len = seq_len
         self.sample_count = sample_count
         self.max_start = len(data) - seq_len - 1
+        self.augment = augment
+        self.noise_std = noise_std
 
     def __len__(self):
         return self.sample_count
@@ -47,6 +49,12 @@ class RandomWindowDataset(Dataset):
         start = random.randint(0, self.max_start)
         seq = self.data[start:start + self.seq_len]
         tgt = self.data[start + self.seq_len]
+
+        # Apply data augmentation if enabled
+        if self.augment:
+            noise = np.random.normal(0, self.noise_std, seq.shape)
+            seq = seq + noise
+
         return torch.tensor(seq, dtype=torch.float32), torch.tensor(tgt, dtype=torch.float32)
 
 def create_datasets(config):
