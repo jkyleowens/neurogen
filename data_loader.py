@@ -83,7 +83,8 @@ def create_datasets(config):
     # Normalize using training data statistics
     if config['data'].get('normalize', False):
         means = train_data.mean(axis=0)
-        stds = train_data.std(axis=0).replace(0, 1)
+        # Handle zeros in standard deviation using np.where
+        stds = np.where(train_data.std(axis=0) == 0, 1, train_data.std(axis=0))
         train_data = (train_data - means) / stds
         val_data = (val_data - means) / stds
         test_data = (test_data - means) / stds
