@@ -30,7 +30,7 @@ class PersistentGRUController(nn.Module):
             dropout (float): Dropout rate
             persistence_factor (float): Factor controlling memory persistence
         """
-        super(PersistentGRU, self).__init__()
+        super(PersistentGRUController, self).__init__()
         
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -86,24 +86,13 @@ class PersistentGRUController(nn.Module):
     def forward(self, x, hidden_dict=None):
         """
         Forward pass through the controller.
-        
-        Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, input_size)
-            hidden_dict (dict, optional): Dictionary containing hidden state and persistent memory
-            
-        Returns:
-            tuple: (output, hidden_dict)
         """
-        # Extract hidden state and persistent memory
+        # Initialize hidden state and persistent memory if not provided
         if hidden_dict is None:
-            hidden = None
-            persistent_memory = None
-        else:
-            hidden = hidden_dict.get('hidden', None)
-            persistent_memory = hidden_dict.get('persistent_memory', None)
-            if persistent_memory is not None:
-                self.persistent_memory = persistent_memory
-        
+            hidden_dict = self.init_hidden(x.size(0), x.device)
+        hidden = hidden_dict['hidden']
+        self.persistent_memory = hidden_dict['persistent_memory']
+
         # Apply GRU layer
         output, hidden_state = self.gru(x, hidden)
         
