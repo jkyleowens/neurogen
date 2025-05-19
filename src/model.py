@@ -136,8 +136,11 @@ class BrainInspiredNN(nn.Module):
         else:
             final_hidden = controller_output
 
-        # Concatenate controller output and input segments
-        input_to_gru = torch.cat((final_hidden.unsqueeze(1), x), dim=-1)
+        # Prepare input for signaling GRU by concatenating controller output across time steps with input sequence
+        seq_len = x.size(1)
+        # Repeat final_hidden across the sequence dimension
+        hidden_rep = final_hidden.unsqueeze(1).repeat(1, seq_len, 1)
+        input_to_gru = torch.cat((hidden_rep, x), dim=-1)
 
         # Pass through the intermediate GRU
         gru_output, _ = self.intermediate_gru(input_to_gru)
