@@ -87,9 +87,14 @@ class PersistentGRUController(nn.Module):
         """
         Forward pass through the controller.
         """
-        # Initialize hidden state and persistent memory if not provided
+        # Initialize or adapt hidden state and persistent memory for current batch size
         if hidden_dict is None:
             hidden_dict = self.init_hidden(x.size(0), x.device)
+        else:
+            h = hidden_dict.get('hidden')
+            # Reinit if batch size changed
+            if h is None or h.size(1) != x.size(0):
+                hidden_dict = self.init_hidden(x.size(0), x.device)
         hidden = hidden_dict['hidden']
         self.persistent_memory = hidden_dict['persistent_memory']
 
