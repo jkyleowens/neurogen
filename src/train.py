@@ -114,6 +114,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
             output = output[:, -1, :]
         # Align feature dimensions if mismatched
         if output.shape != target.shape:
+            print(f"[DEBUG train_epoch] Shape mismatch - output: {output.shape}, target: {target.shape}")
             common_dim = min(output.size(-1), target.size(-1))
             output = output[..., :common_dim]
             target = target[..., :common_dim]
@@ -159,6 +160,7 @@ def validate(model, val_loader, criterion, device):
                 output = output[:, -1, :]
             # Align feature dimensions if mismatched
             if output.shape != target.shape:
+                print(f"[DEBUG validate] Shape mismatch - output: {output.shape}, target: {target.shape}")
                 common_dim = min(output.size(-1), target.size(-1))
                 output = output[..., :common_dim]
                 target = target[..., :common_dim]

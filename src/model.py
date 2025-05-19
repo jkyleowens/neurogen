@@ -8,14 +8,10 @@ the controller, neuromodulator, and other components.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import os
-import sys
 
 # Import from project structure
 from src.controller.persistent_gru import PersistentGRUController
 from src.neuromodulator.reward_modulator import RewardModulator
-from src.utils.tensor_shape_fixes import fix_tensor_shapes
 from src.utils.memory_utils import optimize_memory_usage, print_gpu_memory_status
 from src.utils.reset_model_state import reset_model_state
 
@@ -117,33 +113,26 @@ class BrainInspiredNN(nn.Module):
         Returns:
             torch.Tensor: Output tensor
         """
-        try:
-            # Apply controller
-            controller_output, hidden_dict = self.controller(x, self.hidden)
-            self.hidden = hidden_dict
-            
-            # Apply neuromodulation if reward is provided
-            if reward is not None:
-                controller_output, self.neurotransmitter_levels = self.neuromodulator(
-                    controller_output, 
-                    reward, 
-                    self.neurotransmitter_levels
-                )
-            
-            # Apply output layer
-            output = self.output_layer(controller_output)
-            
-            # Fix tensor shapes if needed
-            output = fix_tensor_shapes(output, target_shape=(x.size(0), self.output_size))
-            
-            return output
-        except Exception as e:
-            print(f"Error in forward pass: {e}")
-            # Emergency fallback: zero tensor with grad enabled
-            out = torch.zeros((x.size(0), self.output_size), device=x.device)
-            out.requires_grad_(True)
-            return out
+        # Apply controller and retain hidden state
+        controller_output, hidden_dict = self.controller(x, self.hidden)
+        self.hidden = hidden_dict
         
+        # Apply neuromodulation if reward is provided
+        if reward is not None:
+            controller_output, self.neurotransmitter_levels = self.neuromodulator(
+                controller_output, reward, self.neurotransmitter_levels
+            )
+        
+        # If output is sequence (batch, seq, hidden), take last time step
+        if controller_output.dim() == 3:
+            final_hidden = controller_output[:, -1, :]
+        else:
+            final_hidden = controller_output
+        
+        # Project to output
+        output = self.output_layer(final_hidden)
+        return output
+    
     def init_hidden(self, batch_size, device):
         """
         Initialize hidden states for the model.
