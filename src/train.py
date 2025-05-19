@@ -21,8 +21,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-import yfinance as yf
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 # Import the model
 from src.model import BrainInspiredNN  # Ensure correct import for the model
@@ -111,6 +109,9 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
         
         # Forward pass
         output = model(data)
+        # If model returns sequence outputs, take the last time-step
+        if output.dim() == 3:
+            output = output[:, -1, :]
         
         # Calculate loss
         loss = criterion(output, target)
@@ -146,10 +147,13 @@ def validate(model, val_loader, criterion, device):
     with torch.no_grad():
         for data, target in tqdm(val_loader, desc='Validation'):
             data, target = data.to(device), target.to(device)
-            
+
             # Forward pass
             output = model(data)
-            
+            # If model returns sequence outputs, take the last time-step
+            if output.dim() == 3:
+                output = output[:, -1, :]
+
             # Calculate loss
             loss = criterion(output, target)
             
@@ -234,8 +238,15 @@ def main():
     plt.title('Training and Validation Losses')
     plt.legend()
     plt.savefig('loss_plot.png')
+    print("Loss plot saved to loss_plot.png")
     
-    print("Training completed!")
+    # Testing
+    test_loss = validate(model, test_loader, criterion, device)
+    print(f"Test Loss: {test_loss:.4f}")
+    
+    # Performance report
+    generate_performance_report(train_losses[-1], val_losses[-1], test_loss, output_dir='docs/')
+    print("Performance report generated in docs/")
 
 # Ensure the main function is complete and properly structured
 if __name__ == "__main__":
