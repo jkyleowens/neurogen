@@ -1,0 +1,135 @@
+"""
+Persistent GRU Controller
+
+This module implements a GRU-based controller with persistent memory
+for the Brain-Inspired Neural Network.
+"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class PersistentGRUController(nn.Module):
+    """
+    A GRU-based controller with persistent memory.
+    
+    This controller maintains a persistent memory state across
+    forward passes, allowing for long-term memory retention.
+    """
+    
+    def __init__(self, input_size, hidden_size, persistent_memory_size=64, 
+                 num_layers=1, dropout=0.2, persistence_factor=0.9):
+        """
+        Initialize the Persistent GRU Controller.
+        
+        Args:
+            input_size (int): Size of input features
+            hidden_size (int): Size of hidden state
+            persistent_memory_size (int): Size of persistent memory
+            num_layers (int): Number of GRU layers
+            dropout (float): Dropout rate
+            persistence_factor (float): Factor controlling memory persistence
+        """
+        super(PersistentGRU, self).__init__()
+        
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.persistent_memory_size = persistent_memory_size
+        self.persistence_factor = persistence_factor
+        self.num_layers = num_layers
+        self.dropout = dropout
+        
+        # GRU layer
+        self.gru = nn.GRU(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            batch_first=True
+        )
+        
+        # Persistent memory projection
+        self.memory_projection = nn.Linear(persistent_memory_size, hidden_size)
+        self.hidden_projection = nn.Linear(hidden_size, persistent_memory_size)
+        
+        # Persistent memory
+        self.persistent_memory = None
+    
+    def init_hidden(self, batch_size, device):
+        """
+        Initialize hidden state and persistent memory.
+        
+        Args:
+            batch_size (int): Batch size
+            device (torch.device): Device to create tensors on
+            
+        Returns:
+            dict: Dictionary containing hidden state and persistent memory
+        """
+        # Initialize hidden state
+        hidden = torch.zeros(
+            self.num_layers, batch_size, self.hidden_size, 
+            device=device
+        )
+        
+        # Initialize persistent memory
+        self.persistent_memory = torch.zeros(
+            batch_size, self.persistent_memory_size,
+            device=device
+        )
+        
+        return {
+            'hidden': hidden,
+            'persistent_memory': self.persistent_memory
+        }
+    
+    def forward(self, x, hidden_dict=None):
+        """
+        Forward pass through the controller.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, input_size)
+            hidden_dict (dict, optional): Dictionary containing hidden state and persistent memory
+            
+        Returns:
+            tuple: (output, hidden_dict)
+        """
+        # Extract hidden state and persistent memory
+        if hidden_dict is None:
+            hidden = None
+            persistent_memory = None
+        else:
+            hidden = hidden_dict.get('hidden', None)
+            persistent_memory = hidden_dict.get('persistent_memory', None)
+            if persistent_memory is not None:
+                self.persistent_memory = persistent_memory
+        
+        # Apply GRU layer
+        output, hidden_state = self.gru(x, hidden)
+        
+        # Update persistent memory if it exists
+        if self.persistent_memory is not None:
+            # Project hidden state to persistent memory space
+            batch_size = x.size(0)
+            last_hidden = hidden_state[-1]  # Get the last layer's hidden state
+            
+            # Project hidden state to persistent memory space
+            memory_update = self.hidden_projection(last_hidden)
+            
+            # Update persistent memory with decay
+            self.persistent_memory = (
+                self.persistence_factor * self.persistent_memory +
+                (1 - self.persistence_factor) * memory_update
+            )
+            
+            # Project persistent memory to hidden space
+            memory_influence = self.memory_projection(self.persistent_memory)
+            
+            # Blend output with memory influence
+            output = output + 0.3 * memory_influence.unsqueeze(1).expand(-1, output.size(1), -1)
+        
+        # Return output and updated hidden state
+        return output, {
+            'hidden': hidden_state,
+            'persistent_memory': self.persistent_memory
+        }
