@@ -302,6 +302,87 @@ class BrainInspiredNN(nn.Module):
         self.neurotransmitter_levels = None
         return self
     
+    def pretrain_components(self, dataloader, device, config=None):
+        """
+        Pretrain individual components of the model.
+        
+        This method pretrains controller and neuromodulator components to ensure
+        they have valid starting points before being used in feedback loops.
+        
+        Args:
+            dataloader: DataLoader for pretraining data
+            device: Device to use for training
+            config: Configuration for pretraining
+            
+        Returns:
+            self: The pretrained model
+        """
+        if config is None:
+            config = self.config.get('pretraining', {})
+        
+        print("\n=== Starting Component Pretraining ===")
+        
+        # 1. Pretrain controller if applicable
+        if hasattr(self, 'controller'):
+            controller_config = config.get('controller', {})
+            if controller_config.get('enabled', True):
+                print("\n--- Pretraining Controller ---")
+                
+                # Import appropriate pretraining method based on controller type
+                if self.config.get('model', {}).get('use_bio_gru', False):
+                    # Use specialized BioGRU pretraining
+                    from src.utils.bio_gru_pretraining import pretrain_biogru
+                    
+                    # Pretrain BioGRU
+                    self.controller = pretrain_biogru(
+                        self.controller,
+                        dataloader,
+                        device,
+                        epochs=controller_config.get('epochs', 5),
+                        learning_rate=controller_config.get('learning_rate', 0.001)
+                    )
+                    
+                    # Also pretrain feedback mechanism
+                    from src.utils.bio_gru_pretraining import pretrain_biogru_feedback_mechanism
+                    self.controller = pretrain_biogru_feedback_mechanism(
+                        self.controller,
+                        dataloader,
+                        device,
+                        epochs=controller_config.get('feedback_epochs', 3),
+                        learning_rate=controller_config.get('feedback_learning_rate', 0.0005)
+                    )
+                else:
+                    # Use standard controller pretraining
+                    from src.utils.pretrain_utils import pretrain_controller
+                    self.controller = pretrain_controller(
+                        self.controller,
+                        dataloader,
+                        device,
+                        epochs=controller_config.get('epochs', 5),
+                        learning_rate=controller_config.get('learning_rate', 0.001)
+                    )
+                    
+                print("Controller pretraining complete")
+        
+        # 2. Pretrain neuromodulation pathway if applicable
+        neuromod_config = config.get('neuromodulator', {})
+        if neuromod_config.get('enabled', True):
+            print("\n--- Pretraining Neuromodulator Pathways ---")
+            
+            from src.utils.pretrain_utils import pretrain_neuromodulator_components
+            self = pretrain_neuromodulator_components(
+                self,
+                dataloader,
+                device,
+                epochs=neuromod_config.get('epochs', 5),
+                learning_rate=neuromod_config.get('learning_rate', 0.0005)
+            )
+            
+            print("Neuromodulator pathway pretraining complete")
+        
+        print("\n=== Component Pretraining Complete ===\n")
+        return self
+    
     @staticmethod
     def setup_model(config, input_shape):
         """

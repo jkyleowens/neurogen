@@ -27,6 +27,9 @@ from src.model import BrainInspiredNN
 from src.utils.memory_utils import optimize_memory_usage, print_gpu_memory_status
 from src.utils.performance_report import generate_performance_report
 from src.utils.reset_model_state import reset_model_state
+from src.utils.financial_data_utils import load_financial_data, visualize_predictions
+from src.utils.pretrain_utils import pretrain_controller, pretrain_neuromodulator_components, create_pretrain_dataloader
+import pandas as pd
 
 def parse_args():
     """Parse command line arguments."""
@@ -39,6 +42,14 @@ def parse_args():
                         help='Path to checkpoint to resume training from')
     parser.add_argument('--epochs', type=int, default=None,
                         help='Number of training epochs (overrides config file)')
+    parser.add_argument('--pretrain', action='store_true',
+                        help='Enable pretraining of neural components')
+    parser.add_argument('--pretrain-epochs', type=int, default=5,
+                        help='Number of pretraining epochs')
+    parser.add_argument('--skip-controller-pretrain', action='store_true',
+                        help='Skip controller pretraining')
+    parser.add_argument('--skip-neuromod-pretrain', action='store_true',
+                        help='Skip neuromodulator pretraining')
     return parser.parse_args()
 
 def load_config(config_path):
@@ -48,36 +59,17 @@ def load_config(config_path):
     return config
 
 def load_data(config):
-    """Load and preprocess financial data."""
-    # This function would be properly implemented with your actual data loading logic
-    # Using placeholder data for now
-    batch_size = config['training']['batch_size']
-    input_size = config['model']['input_size']
-    output_size = config['model']['output_size']
-    seq_length = config['data']['sequence_length']
+    """
+    Load and preprocess financial data.
     
-    # Create dummy data
-    X = torch.randn(1000, seq_length, input_size)
-    y = torch.randn(1000, output_size)
-    
-    # Split data
-    train_size = int(len(X) * config['data']['train_ratio'])
-    val_size = int(len(X) * config['data']['val_ratio'])
-    test_size = len(X) - train_size - val_size
-    
-    X_train, X_val, X_test = torch.split(X, [train_size, val_size, test_size])
-    y_train, y_val, y_test = torch.split(y, [train_size, val_size, test_size])
-    
-    # Create data loaders
-    train_dataset = TensorDataset(X_train, y_train)
-    val_dataset = TensorDataset(X_val, y_val)
-    test_dataset = TensorDataset(X_test, y_test)
-    
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size)
-    
-    return train_loader, val_loader, test_loader
+    Args:
+        config (dict): Configuration parameters
+        
+    Returns:
+        tuple: (train_loader, val_loader, test_loader, data_info)
+    """
+    # Use the specialized financial data loader
+    return load_financial_data(config)
 
 def calculate_accuracy(output, target, threshold=0.1):
     """
@@ -463,10 +455,44 @@ def main():
     print(f"Using device: {device}")
     
     # Load data
-    train_loader, val_loader, test_loader = load_data(config)
+    train_loader, val_loader, test_loader, data_info = load_data(config)
+    
+    # Adjust input size based on actual data dimensions if needed
+    first_batch = next(iter(train_loader))
+    input_features = first_batch[0].shape[-1]
+    if input_features != config['model']['input_size']:
+        print(f"Adjusting model input size from {config['model']['input_size']} to {input_features} based on data")
+        config['model']['input_size'] = input_features
     
     # Create model
     model = BrainInspiredNN(config).to(device)
+    
+    # Pretraining logic
+    if args.pretrain or config.get('pretraining', {}).get('enabled', False):
+        # Customize pretraining config if args provided
+        pretrain_config = config.get('pretraining', {}).copy()
+        
+        # Override epochs if specified via args
+        if args.pretrain_epochs:
+            pretrain_config['controller'] = pretrain_config.get('controller', {})
+            pretrain_config['controller']['epochs'] = args.pretrain_epochs
+            pretrain_config['neuromodulator'] = pretrain_config.get('neuromodulator', {})
+            pretrain_config['neuromodulator']['epochs'] = args.pretrain_epochs
+        
+        # Skip components if specified via args
+        if args.skip_controller_pretrain:
+            pretrain_config['controller'] = pretrain_config.get('controller', {})
+            pretrain_config['controller']['enabled'] = False
+            
+        if args.skip_neuromod_pretrain:
+            pretrain_config['neuromodulator'] = pretrain_config.get('neuromodulator', {})
+            pretrain_config['neuromodulator']['enabled'] = False
+        
+        # Create smaller dataloader for pretraining
+        pretrain_dataloader = create_pretrain_dataloader(train_loader)
+        
+        # Use the unified model method for pretraining
+        model.pretrain_components(pretrain_dataloader, device, pretrain_config)
     
     # Define loss function and optimizer
     criterion = nn.MSELoss()
@@ -548,18 +574,41 @@ def main():
             f.write(f"Epoch {epoch+1}: Train Loss={train_loss:.6f}, Train Acc={train_accuracy:.2f}%, "
                     f"Val Loss={val_loss:.6f}, Val Acc={val_accuracy:.2f}%\n")
         
-        # Check for improvement
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        # Check for improvement - prioritize accuracy over loss
+        improved = False
+        
+        # Keep track of best validation accuracy separately
+        if 'best_val_accuracy' not in locals():
+            best_val_accuracy = 0.0
+        
+        # Check if accuracy improved
+        if val_accuracy > best_val_accuracy:
+            best_val_accuracy = val_accuracy
+            improved = True
             epochs_without_improvement = 0
-            
+            print(f"Validation accuracy improved to {best_val_accuracy:.2f}%")
+        # If accuracy is the same, check if loss improved
+        elif val_accuracy == best_val_accuracy and val_loss < best_val_loss:
+            best_val_loss = val_loss
+            improved = True
+            epochs_without_improvement = 0
+            print(f"Validation loss improved to {best_val_loss:.6f} with same accuracy")
+        # If loss improved significantly
+        elif val_loss < best_val_loss * 0.95:  # 5% improvement threshold
+            best_val_loss = val_loss
+            improved = True
+            epochs_without_improvement = 0
+            print(f"Validation loss improved significantly to {best_val_loss:.6f}")
+        
+        # Save checkpoint if there was improvement
+        if improved:
             # Save checkpoint
             checkpoint_path = os.path.join(checkpoint_dir, 'best_model.pt')
             checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'best_val_loss': best_val_loss,
-                'val_accuracy': val_accuracy,
+                'best_val_accuracy': best_val_accuracy,
                 'config': config
             }
             
@@ -610,6 +659,51 @@ def main():
     print("\n===== Test Results =====")
     for metric, value in test_metrics.items():
         print(f"{metric}: {value}")
+    
+    # Generate predictions for visualization
+    all_predictions = []
+    all_targets = []
+    
+    model.reset_state()
+    model.eval()
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            
+            # Process for consistent format
+            if output.dim() == 3:
+                output = output[:, -1, :]
+                
+            all_predictions.append(output.cpu().numpy())
+            all_targets.append(target.cpu().numpy())
+    
+    # Convert to numpy arrays
+    try:
+        predictions = np.concatenate(all_predictions, axis=0)
+        targets = np.concatenate(all_targets, axis=0)
+        
+        # Transform back to original scale if needed
+        if hasattr(data_info['test_dataset'], 'inverse_transform'):
+            predictions = data_info['test_dataset'].inverse_transform(predictions)
+            targets = data_info['test_dataset'].inverse_transform(targets)
+            
+        # Create and save prediction visualization
+        fig = visualize_predictions(targets, predictions, 
+                                    title=f"Predictions vs Actual ({config['data']['ticker_symbol']})")
+        fig.savefig(os.path.join(plot_dir, 'price_predictions.png'))
+        plt.close(fig)
+        
+        # Save predictions to CSV
+        prediction_df = pd.DataFrame({
+            'Actual': targets.flatten(),
+            'Predicted': predictions.flatten()
+        })
+        prediction_df.to_csv(os.path.join('results', 'predictions.csv'), index=False)
+        print(f"Predictions saved to results/predictions.csv")
+        
+    except Exception as e:
+        print(f"Error visualizing predictions: {str(e)}")
     
     # Generate performance report with all metrics
     report_metrics = {

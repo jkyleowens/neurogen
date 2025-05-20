@@ -1,0 +1,68 @@
+# Update the config file for financial timeseries prediction
+
+# General parameters
+general:
+  device: "cuda"  # Use GPU if available
+  results_dir: "results"
+  
+# Model parameters
+model:
+  input_size: 25  # Will be automatically adjusted based on data features
+  hidden_size: 128
+  output_size: 1  # Predicting a single value (next price)
+  use_bio_gru: true  # Use the biologically-inspired GRU
+  
+# Controller parameters
+controller:
+  type: "persistent_gru"
+  num_layers: 2
+  persistent_memory_size: 64
+  dropout: 0.2
+  
+# Neuromodulator parameters
+neuromodulator:
+  dopamine_scale: 1.0
+  serotonin_scale: 0.8
+  norepinephrine_scale: 0.7
+  acetylcholine_scale: 0.9
+  reward_decay: 0.95
+  
+# Pretraining parameters (NEW)
+pretraining:
+  enabled: true
+  epochs: 5
+  controller:
+    enabled: true
+    learning_rate: 0.001
+  neuromodulator:
+    enabled: true
+    learning_rate: 0.0005
+  
+# Training parameters
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  num_epochs: 100
+  weight_decay: 0.0001
+  learning_mode: "neuromodulator"  # Use neuromodulator-driven learning
+  optimizer: "adam"
+  early_stopping_patience: 30
+  accuracy_threshold: 0.02  # 2% price prediction accuracy threshold
+  
+# Data parameters
+data:
+  dataset: "financial"
+  ticker_symbol: "AAPL"  # Stock symbol to predict
+  features: "all"  # Use all available features and indicators
+  start_date: "2018-01-01"  # Start date for data
+  end_date: "2023-12-31"  # End date for data
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  sequence_length: 40  # Use 40 days of history to predict the next day
+  prediction_horizon: 1  # Predict 1 day into the future
+  target_column: "Close"  # Target column to predict
+  normalize: "standard"  # Use standard normalization
+  include_indicators: true  # Include technical indicators
+  num_workers: 2  # DataLoader workers
+  pin_memory: true  # Pin memory for faster data transfer to GPU
