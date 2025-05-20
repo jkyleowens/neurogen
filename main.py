@@ -454,8 +454,13 @@ def main():
     device = torch.device(args.device)
     print(f"Using device: {device}")
     
-    # Load data
-    train_loader, val_loader, test_loader, data_info = load_data(config)
+    # Load data with error handling
+    try:
+        train_loader, val_loader, test_loader, data_info = load_data(config)
+    except Exception as e:
+        print(f"Error loading data: {str(e)}")
+        print("Please check your data configuration and ensure the financial data source is accessible.")
+        sys.exit(1)
     
     # Adjust input size based on actual data dimensions if needed
     first_batch = next(iter(train_loader))
