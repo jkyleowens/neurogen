@@ -209,7 +209,7 @@ def main():
     val_losses = []
     
     # Add early stopping mechanism
-    early_stopping_patience = config['training'].get('early_stopping_patience', 50)
+    early_stopping_patience = config['training'].get('early_stopping_patience', 100)  # Extended patience period
     best_val_loss = float('inf')
     epochs_without_improvement = 0
 

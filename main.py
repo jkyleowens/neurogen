@@ -505,7 +505,7 @@ def main():
     
     # Training parameters
     num_epochs = config['training']['num_epochs']
-    early_stopping_patience = config['training'].get('early_stopping_patience', 10)
+    early_stopping_patience = config['training'].get('early_stopping_patience', 30)  # Extended patience period
     checkpoint_dir = os.path.join('models', 'checkpoints')
     os.makedirs(checkpoint_dir, exist_ok=True)
     
