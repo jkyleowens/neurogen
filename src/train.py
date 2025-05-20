@@ -192,7 +192,7 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'], weight_decay=weight_decay)
 
     # Define learning rate scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
     
     # Resume from checkpoint if specified
     start_epoch = 0
@@ -291,7 +291,7 @@ def main():
         f.write(f"Test Loss: {test_loss:.6f}\n")
 
     # Performance report
-    generate_performance_report(train_losses[-1], val_losses[-1], test_loss, output_dir='docs/')
+    generate_performance_report(train_losses, val_losses, test_loss, output_dir='docs/')
     print("Performance report generated in docs/")
 
 # Ensure the main function is complete and properly structured
