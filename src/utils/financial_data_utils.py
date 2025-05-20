@@ -189,8 +189,8 @@ def add_technical_indicators(df):
     result['Volume_Change'] = volume.pct_change() * 100
     
     # Price to Moving Average Ratios
-    result['Price_to_MA5'] = close / result['MA5']
-    result['Price_to_MA20'] = close / result['MA20']
+    result['Price_to_MA5'] = close.values / result['MA5'].values
+    result['Price_to_MA20'] = close.values / result['MA20'].values
     
     return result
 
