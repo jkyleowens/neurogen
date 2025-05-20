@@ -39,6 +39,25 @@ def generate_performance_report(train_losses, val_losses, test_loss, metrics=Non
 
     print(f"Performance summary saved to {summary_path}")
 
+    # Update the performance report to include separate folders for results
+    train_dir = os.path.join(output_dir, 'train')
+    val_dir = os.path.join(output_dir, 'val')
+    test_dir = os.path.join(output_dir, 'test')
+    os.makedirs(train_dir, exist_ok=True)
+    os.makedirs(val_dir, exist_ok=True)
+    os.makedirs(test_dir, exist_ok=True)
+
+    # Save per-epoch training and validation losses
+    for i, (tr, vl) in enumerate(zip(train_losses, val_losses), start=1):
+        with open(os.path.join(train_dir, f'epoch_{i}_loss.txt'), 'w') as f:
+            f.write(f"Train Loss: {tr:.6f}\n")
+        with open(os.path.join(val_dir, f'epoch_{i}_loss.txt'), 'w') as f:
+            f.write(f"Val Loss: {vl:.6f}\n")
+
+    # Save test loss
+    with open(os.path.join(test_dir, 'test_loss.txt'), 'w') as f:
+        f.write(f"Test Loss: {test_loss:.6f}\n")
+
     # Plot training vs validation losses
     plt.figure(figsize=(8, 6))
     if isinstance(train_losses, (list, tuple)):

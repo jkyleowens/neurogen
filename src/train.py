@@ -218,6 +218,14 @@ def main():
         threshold = config['training'].get('accuracy_threshold', 0.1)
         return (torch.abs(output - target) < threshold).float().mean().item()
 
+    # Update the training loop to save results in separate folders
+    train_output_dir = os.path.join('results', 'train')
+    val_output_dir = os.path.join('results', 'val')
+    test_output_dir = os.path.join('results', 'test')
+    os.makedirs(train_output_dir, exist_ok=True)
+    os.makedirs(val_output_dir, exist_ok=True)
+    os.makedirs(test_output_dir, exist_ok=True)
+
     # Modify training loop to remove backpropagation and integrate neuromodulator-driven updates
     for epoch in range(start_epoch, num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
@@ -250,6 +258,14 @@ def main():
 
         print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
+        # Save training loss
+        with open(os.path.join(train_output_dir, f'epoch_{epoch+1}_loss.txt'), 'w') as f:
+            f.write(f"Train Loss: {train_loss:.6f}\n")
+
+        # Save validation loss
+        with open(os.path.join(val_output_dir, f'epoch_{epoch+1}_loss.txt'), 'w') as f:
+            f.write(f"Val Loss: {val_loss:.6f}\n")
+
         # Early stopping check
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -265,6 +281,10 @@ def main():
     test_loss = validate(model, test_loader, criterion, device)
     print(f"Test Loss: {test_loss:.4f}")
     
+    # Save test loss
+    with open(os.path.join(test_output_dir, 'test_loss.txt'), 'w') as f:
+        f.write(f"Test Loss: {test_loss:.6f}\n")
+
     # Performance report
     generate_performance_report(train_losses[-1], val_losses[-1], test_loss, output_dir='docs/')
     print("Performance report generated in docs/")
