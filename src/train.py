@@ -115,6 +115,11 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
             # Apply neuromodulator-driven update
             model(data, reward=reward)
         
+        # Add a check for NaN values in loss
+        if torch.isnan(loss_val):
+            print(f"[DEBUG] NaN detected in loss at batch {batch_idx}. Skipping this batch.")
+            continue
+
         # Accumulate loss value for reporting
         total_loss += loss_val.item()
     
