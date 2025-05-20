@@ -150,10 +150,12 @@ class BrainInspiredNN(nn.Module):
 
         # Neuromodulator-driven feedback adjustment
         if reward is not None:
-            feedback_signal = reward.unsqueeze(1) * final_gru_output
+            # Use scalar reward to modulate hidden state via broadcasting
+            feedback_signal = final_gru_output * reward
             final_gru_output = final_gru_output + feedback_signal
 
-            # Update neuron health based on feedback magnitude
+        # Update neuron health based on feedback magnitude
+        if reward is not None:
             with torch.no_grad():
                 effect = torch.mean(torch.abs(feedback_signal), dim=0)
                 self.neuron_health = self.neuron_health * self.health_decay + effect * (1 - self.health_decay)
@@ -170,9 +172,11 @@ class BrainInspiredNN(nn.Module):
         # Neuromodulator-driven weight update (output layer)
         if reward is not None:
             with torch.no_grad():
-                delta = (reward.view(-1) * final_gru_output).mean(dim=0)
+                # Compute weight delta from scalar reward
+                delta = (final_gru_output * reward).mean(dim=0)
                 self.output_layer.weight.data += self.learning_rate * delta.unsqueeze(0)
-                self.output_layer.bias.data += self.learning_rate * reward.mean()
+                # Bias update as scalar reward
+                self.output_layer.bias.data += self.learning_rate * reward
 
         return output
     
