@@ -142,17 +142,65 @@ class BrainInspiredNN(nn.Module):
         else:
             final_hidden = controller_output
 
-        # Neuromodulator-driven feedback adjustment
+        # Enhanced neuromodulator-driven feedback adjustment with anti-overfitting mechanisms
         if reward is not None:
-            # Use scalar reward to modulate hidden state via broadcasting
-            feedback_signal = final_hidden * reward
+            # Calculate reward absolute magnitude and sign separately
+            reward_magnitude = torch.abs(reward)
+            reward_sign = torch.sign(reward)
+            
+            # Apply non-linear transformation to prevent excessive feedback on large rewards
+            # This helps prevent the model from overcommitting to spurious large rewards
+            adjusted_reward = reward_sign * torch.tanh(reward_magnitude * 0.5)
+            
+            # Dynamic feedback strength that reduces with continued high rewards (anti-overfitting)
+            # This prevents the model from becoming too specialized/confident
+            if hasattr(self, '_prev_rewards'):
+                # Track recent reward history
+                self._prev_rewards.append(adjusted_reward.item())
+                if len(self._prev_rewards) > 10:  # Keep history limited
+                    self._prev_rewards.pop(0)
+                
+                # Calculate average recent reward and variance
+                avg_reward = sum(self._prev_rewards) / len(self._prev_rewards)
+                reward_variance = sum((r - avg_reward)**2 for r in self._prev_rewards) / len(self._prev_rewards)
+                
+                # Reduce feedback strength when rewards are consistently high with low variance
+                # (indicating potential overfitting to a specific pattern)
+                consistency_factor = 1.0
+                if avg_reward > 0.5 and reward_variance < 0.1:
+                    consistency_factor = 0.5  # Reduce feedback to prevent overfitting
+                
+                feedback_signal = final_hidden * adjusted_reward * consistency_factor
+            else:
+                # First reward, initialize history
+                self._prev_rewards = [adjusted_reward.item()]
+                feedback_signal = final_hidden * adjusted_reward
+            
+            # Apply feedback signal
             final_hidden = final_hidden + feedback_signal
 
-        # Update neuron health based on feedback magnitude
+        # Update neuron health based on feedback magnitude with improved balance
         if reward is not None:
             with torch.no_grad():
-                effect = torch.mean(torch.abs(feedback_signal), dim=0)
+                # Calculate effect but with diminishing returns for very large feedback
+                effect = torch.tanh(torch.mean(torch.abs(feedback_signal), dim=0))
+                
+                # Introduce homeostasis - neurons that are consistently active get less health boost
+                if hasattr(self, '_neuron_activity'):
+                    # Update activity tracking (exponential moving average)
+                    self._neuron_activity = 0.9 * self._neuron_activity + 0.1 * (final_hidden > 0.5).float()
+                    
+                    # Neurons with balanced activity (not too high or low) get health boost
+                    # This encourages diversity in neural population
+                    activity_modifier = 1.0 - torch.abs(self._neuron_activity - 0.5) * 0.5
+                    effect = effect * activity_modifier
+                else:
+                    # First update, initialize tracking
+                    self._neuron_activity = 0.1 * (final_hidden > 0.5).float()
+                
+                # Update health with more balanced decay
                 self.neuron_health = self.neuron_health * self.health_decay + effect * (1 - self.health_decay)
+                
                 # Update mask: neurons below threshold die
                 self.neuron_mask = (self.neuron_health > self.death_threshold).float()
 
@@ -173,13 +221,49 @@ class BrainInspiredNN(nn.Module):
 
     def update_weights(self, reward):
         """
-        Update output layer weights based on last features and reward signal.
+        Update output layer weights based on last features and reward signal
+        with anti-overfitting mechanisms.
         """
         with torch.no_grad():
-            # reward: scalar tensor; _last_features: (batch, hidden_size)
-            delta = (self._last_features * reward).mean(dim=0)
-            self.output_layer.weight.data += self.learning_rate * delta.unsqueeze(0)
-            self.output_layer.bias.data += self.learning_rate * reward
+            # Process reward for more stable learning
+            if isinstance(reward, (int, float)):
+                reward_value = reward
+            else:
+                # If tensor, get scalar value
+                reward_value = reward.item() if reward.numel() == 1 else reward.mean().item()
+                
+            # Apply adaptive learning rate based on reward history
+            if not hasattr(self, '_reward_history'):
+                self._reward_history = [abs(reward_value)]
+                effective_lr = self.learning_rate
+            else:
+                # Track reward history for adaptive learning
+                self._reward_history.append(abs(reward_value))
+                if len(self._reward_history) > 20:
+                    self._reward_history.pop(0)
+                
+                # Calculate reward statistics
+                avg_reward = sum(self._reward_history) / len(self._reward_history)
+                max_reward = max(self._reward_history)
+                
+                # Reduce learning rate when rewards are consistently high (preventing overfitting)
+                lr_scale = 1.0
+                if avg_reward > 0.5 * max_reward and avg_reward > 0.2:
+                    # Rewards are consistently high, reduce learning rate to prevent overfitting
+                    lr_scale = 0.5
+                
+                effective_lr = self.learning_rate * lr_scale
+            
+            # Calculate update with feature normalization to prevent domination by active neurons
+            normalized_features = self._last_features / (self._last_features.norm(dim=1, keepdim=True) + 1e-6)
+            delta = (normalized_features * reward).mean(dim=0)
+            
+            # Apply L2 regularization (weight decay) to prevent overfitting
+            weight_decay = 0.001 * self.output_layer.weight.data
+            
+            # Update weights with regularization
+            self.output_layer.weight.data += effective_lr * delta.unsqueeze(0) - weight_decay
+            self.output_layer.bias.data += effective_lr * reward_value * 0.1  # Smaller updates for bias
 
     def init_hidden(self, batch_size, device):
         """

@@ -116,8 +116,15 @@ class RewardModulator(nn.Module):
         # Apply decay to current levels
         decayed_levels = current_levels * self.reward_decay
         
-        # Blend decayed levels with new levels
-        updated_levels = 0.7 * decayed_levels + 0.3 * new_levels
+        # Apply adaptive blending based on reward magnitude
+        # Higher reward = more weight to new levels to increase adaptability
+        reward_magnitude = torch.abs(reward).mean()
+        adaptive_blend_rate = torch.clamp(0.3 + 0.3 * reward_magnitude, 0.2, 0.5)
+        updated_levels = (1 - adaptive_blend_rate) * decayed_levels + adaptive_blend_rate * new_levels
+        
+        # Apply regularization to prevent extreme values that lead to overfitting
+        # This ensures modulator values stay in a reasonable range and prevents dominance
+        updated_levels = torch.clamp(updated_levels, 0.2, 0.8)
         self.modulator_levels = updated_levels
         
         # Apply modulation to the input
@@ -127,16 +134,22 @@ class RewardModulator(nn.Module):
         norepinephrine = updated_levels[:, 2].unsqueeze(1) * self.scales['norepinephrine']
         acetylcholine = updated_levels[:, 3].unsqueeze(1) * self.scales['acetylcholine']
         
-        # Modulate the input signal
-        # - Dopamine: Enhances signal strength
-        # - Serotonin: Regulates signal stability
-        # - Norepinephrine: Increases signal-to-noise ratio
-        # - Acetylcholine: Enhances signal precision
+        # Modulate the input signal with balanced coefficients to reduce overfitting
+        # - Dopamine: Enhances signal strength but can lead to overfitting if too strong
+        # - Serotonin: Regulates signal stability and acts as regularizer
+        # - Norepinephrine: Increases signal-to-noise ratio, helps focus on important features
+        # - Acetylcholine: Enhances signal precision, but needs balance
+        
+        # Calculate anti-overfitting factor based on modulator levels
+        # When dopamine is high (reward-seeking), increase regularization
+        regularization_factor = torch.sigmoid(dopamine.mean() * 5 - 2.0)
+        
         modulated_output = (
-            x * (1.0 + 0.2 * dopamine) +  # Enhance signal strength
-            0.1 * serotonin * torch.tanh(x) +  # Stabilize signal
-            0.1 * norepinephrine * torch.sign(x) * torch.abs(x) +  # Increase signal-to-noise
-            0.1 * acetylcholine * torch.sigmoid(x)  # Enhance precision
+            x * (1.0 + 0.15 * dopamine) +  # Reduced dopamine influence to prevent overfitting
+            (0.1 + 0.05 * regularization_factor) * serotonin * torch.tanh(x) +  # Increase stabilization when needed
+            0.1 * norepinephrine * torch.sign(x) * torch.abs(x) +  # Maintain signal-to-noise ratio
+            0.1 * acetylcholine * torch.sigmoid(x) +  # Maintain precision
+            0.05 * torch.randn_like(x) * regularization_factor  # Add small noise when regularization needed
         )
         
         return modulated_output, updated_levels
