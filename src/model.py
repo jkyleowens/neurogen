@@ -11,6 +11,7 @@ import torch.nn.functional as F
 
 # Import from project structure
 from src.controller.persistent_gru import PersistentGRUController
+from bio_gru import BioGRU  # Biological GRU implementation
 from src.utils.memory_utils import optimize_memory_usage, print_gpu_memory_status
 from src.utils.reset_model_state import reset_model_state
 
@@ -75,30 +76,29 @@ class BrainInspiredNN(nn.Module):
             self.reward_decay = reward_decay
             self.config = config or {}
 
-        # Initialize controller (GRU-based)
-        self.controller = PersistentGRUController(
-            input_size=self.input_size,
-            hidden_size=self.hidden_size,
-            persistent_memory_size=self.persistent_memory_size,
-            num_layers=self.num_layers,
-            dropout=self.dropout
-        )
+        # Initialize controller (choose bio GRU if configured)
+        if self.config.get('model', {}).get('use_bio_gru', False):
+            # Use the biological GRU
+            self.controller = BioGRU(
+                input_size=self.input_size,
+                hidden_size=self.hidden_size,
+                num_layers=self.num_layers,
+                output_size=self.output_size
+            )
+        else:
+            # Use standard persistent GRU
+            self.controller = PersistentGRUController(
+                input_size=self.input_size,
+                hidden_size=self.hidden_size,
+                persistent_memory_size=self.persistent_memory_size,
+                num_layers=self.num_layers,
+                dropout=self.dropout
+            )
         
-        # GRU layer replacing the neuromodulator
-        self.intermediate_gru = nn.GRU(
-            input_size=self.hidden_size + self.input_size,  # Controller output + input segment
-            hidden_size=self.hidden_size,
-            num_layers=1,
-            batch_first=True
-        )
-        
-        # Output layer
+        # Output projection and regularization
         self.output_layer = nn.Linear(self.hidden_size, self.output_size)
-        # Dropout for regularization
         self.dropout_layer = nn.Dropout(self.dropout)
-        # Batch normalization layer
-        self.batch_norm = nn.BatchNorm1d(self.hidden_size)
-        
+
         # Health and pruning parameters for neuron death
         health_conf = config.get('neuron_health', {}) if config else {}
         self.health_decay = health_conf.get('health_decay', 0.99)
@@ -126,9 +126,15 @@ class BrainInspiredNN(nn.Module):
             torch.Tensor: Output tensor
         """
         # Modify forward pass to support feedback-driven learning
-        # Apply controller and retain hidden state
-        controller_output, hidden_dict = self.controller(x, self.hidden)
-        self.hidden = hidden_dict
+        # Apply controller (biological or persistent) and retain hidden state
+        if self.config.get('model', {}).get('use_bio_gru', False):
+            # BioGRU returns (output_seq, hidden_states)
+            controller_output, new_hidden = self.controller(x, self.hidden)
+            self.hidden = new_hidden
+        else:
+            # PersistentGRUController returns (output_seq, hidden_dict)
+            controller_output, hidden_dict = self.controller(x, self.hidden)
+            self.hidden = hidden_dict
 
         # If output is sequence (batch, seq, hidden), take last time step
         if controller_output.dim() == 3:
@@ -136,23 +142,11 @@ class BrainInspiredNN(nn.Module):
         else:
             final_hidden = controller_output
 
-        # Prepare input for signaling GRU by concatenating controller output across time steps with input sequence
-        seq_len = x.size(1)
-        # Repeat final_hidden across the sequence dimension
-        hidden_rep = final_hidden.unsqueeze(1).repeat(1, seq_len, 1)
-        input_to_gru = torch.cat((hidden_rep, x), dim=-1)
-
-        # Pass through the intermediate GRU
-        gru_output, _ = self.intermediate_gru(input_to_gru)
-
-        # Take the last time step of GRU output
-        final_gru_output = gru_output[:, -1, :]
-
         # Neuromodulator-driven feedback adjustment
         if reward is not None:
             # Use scalar reward to modulate hidden state via broadcasting
-            feedback_signal = final_gru_output * reward
-            final_gru_output = final_gru_output + feedback_signal
+            feedback_signal = final_hidden * reward
+            final_hidden = final_hidden + feedback_signal
 
         # Update neuron health based on feedback magnitude
         if reward is not None:
@@ -163,23 +157,30 @@ class BrainInspiredNN(nn.Module):
                 self.neuron_mask = (self.neuron_health > self.death_threshold).float()
 
         # Apply neuron mask to prune dead neurons
-        final_gru_output = final_gru_output * self.neuron_mask
+        final_hidden = final_hidden * self.neuron_mask
+
+        # Store features for potential weight updates
+        self._last_features = final_hidden.detach()
 
         # Apply dropout then project to output
-        out_hidden = self.dropout_layer(final_gru_output)
+        out_hidden = self.dropout_layer(final_hidden)
         output = self.output_layer(out_hidden)
 
-        # Neuromodulator-driven weight update (output layer)
+        # Optionally update weights if reward provided
         if reward is not None:
-            with torch.no_grad():
-                # Compute weight delta from scalar reward
-                delta = (final_gru_output * reward).mean(dim=0)
-                self.output_layer.weight.data += self.learning_rate * delta.unsqueeze(0)
-                # Bias update as scalar reward
-                self.output_layer.bias.data += self.learning_rate * reward
-
+            self.update_weights(reward)
         return output
-    
+
+    def update_weights(self, reward):
+        """
+        Update output layer weights based on last features and reward signal.
+        """
+        with torch.no_grad():
+            # reward: scalar tensor; _last_features: (batch, hidden_size)
+            delta = (self._last_features * reward).mean(dim=0)
+            self.output_layer.weight.data += self.learning_rate * delta.unsqueeze(0)
+            self.output_layer.bias.data += self.learning_rate * reward
+
     def init_hidden(self, batch_size, device):
         """
         Initialize hidden states for the model.

@@ -86,7 +86,7 @@ def load_data(config):
 
 def train_epoch(model, train_loader, optimizer, criterion, device):
     """
-    Train the model for one epoch.
+    Train the model for one epoch using neuromodulator-driven learning (no backprop).
     
     Args:
         model: The neural network model
@@ -98,26 +98,26 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
     Returns:
         float: Average training loss
     """
-    # Removing traditional backpropagation; learning via neuromodulation
-    model.reset_state()
     model.train()
     total_loss = 0.0
-
+    
     for batch_idx, (data, target) in enumerate(tqdm(train_loader, desc='Training')):
+        # Reset model state for each batch to avoid graph growth
+        model.reset_state()
         data, target = data.to(device), target.to(device)
-
-        # Forward pass
-        output = model(data)
-
-        # Compute reward signal (negative loss)
-        reward = -criterion(output, target).detach()
-
-        # Neuromodulator-driven update during forward
-        model(data, reward=reward)
-
-        # Accumulate loss for monitoring
-        total_loss += criterion(output, target).item()
-
+        
+        # Forward pass without tracking gradients
+        with torch.no_grad():
+            output = model(data)
+            loss_val = criterion(output, target)
+            # Reward is negative loss
+            reward = -loss_val
+            # Apply neuromodulator-driven update
+            model(data, reward=reward)
+        
+        # Accumulate loss value for reporting
+        total_loss += loss_val.item()
+    
     return total_loss / len(train_loader)
 
 def validate(model, val_loader, criterion, device):
