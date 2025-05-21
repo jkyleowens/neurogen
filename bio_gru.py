@@ -228,98 +228,237 @@ class BioNeuron(nn.Module):
         
         return activation
     
-    def update_health(self, reward=None):
+    def update_health(self, reward=None, activity_threshold=0.05):
         """
-        Update neuron health based on activity and utility.
+        Update neuron health based on utility and activity pattern.
+        """
+        recent_activity = self.activation_history[-20:].mean()
         
-        Args:
-            reward: Optional reward signal to influence health
-            
-        Returns:
-            Current health value
-        """
-        with torch.no_grad():
-            # Calculate recent activity level
-            recent_activity = self.activation_history[-20:].mean()
-            
-            # Activity-based health update
-            activity_factor = torch.sigmoid((recent_activity - 0.01) * 10)  # Threshold at 0.01
-            
-            # Utility-based health update (if utility tracking is enabled)
-            utility_factor = torch.sigmoid(self.utility)
-            
-            # Health update rate
-            update_rate = 0.01
-            
-            # Combine factors with reward if available
-            if reward is not None:
-                reward_factor = torch.sigmoid(reward * 5)  # Scale and bound reward
-                health_change = update_rate * (0.4 * activity_factor + 0.3 * utility_factor + 0.3 * reward_factor - 0.2)
-            else:
-                health_change = update_rate * (0.6 * activity_factor + 0.4 * utility_factor - 0.2)
-            
-            # Update health
-            self.health = torch.clamp(self.health + health_change, 0.0, 1.0)
-            
-            return self.health
+        # Penalize neurons with very low or extremely high activity
+        balanced_activity = 1.0 - abs(recent_activity - self.target_activity) * 2
+        
+        # Reward neurons showing stable, moderate activity patterns
+        activity_variability = self.activation_history[-20:].std()
+        stability_factor = torch.exp(-activity_variability * 5)
+        
+        # Incorporate reward signal if provided
+        if reward is not None:
+            health_change = 0.01 * (0.4 * balanced_activity + 
+                                    0.3 * stability_factor + 
+                                    0.3 * torch.sigmoid(reward * 5) - 0.2)
+        else:
+            health_change = 0.01 * (0.6 * balanced_activity + 
+                                    0.4 * stability_factor - 0.2)
+        
+        # Update health with bounds
+        self.health = torch.clamp(self.health + health_change, 0.0, 1.0)
+        
+        return self.health
     
-    def update_weights(self, error_signal, learning_rate=0.01):
+    def update_weights(self, error_signal, learning_rate=0.01, regularization=0.0001):
         """
-        Update weights using local learning rules influenced by calcium levels.
+        Update weights using biologically-plausible local learning rules.
+        """
+        # Skip update if not enough history
+        if len(self.input_history) < 10 or len(self.activation_records) < 10:
+            return 0.0
+        
+        # Calculate average recent input and activation
+        recent_inputs = torch.stack(list(self.input_history)[-10:]).mean(0)
+        recent_activation = torch.stack(list(self.activation_records)[-10:]).mean(0)
+        
+        # Calculate input-output correlation (Hebbian component)
+        hebbian_update = recent_activation * recent_inputs
+        
+        # Error-driven component with sign-dependent scaling
+        error_magnitude = torch.abs(error_signal.detach().mean())
+        error_sign = torch.sign(error_signal.detach().mean())
+        # Scale learning rate based on error magnitude (larger errors = larger updates)
+        adaptive_lr = learning_rate * torch.sigmoid(error_magnitude * 3)
+        
+        # Directional update based on error sign and inputs
+        error_update = -error_sign * recent_inputs * error_magnitude
+        
+        # Combine Hebbian and error-driven updates with dynamically adjusted balance
+        # When error is large, favor error-driven updates
+        hebbian_weight = torch.clamp(1.0 - error_magnitude, 0.2, 0.8)
+        error_weight = 1.0 - hebbian_weight
+        
+        total_update = hebbian_update * hebbian_weight + error_update * error_weight
+        
+        # Apply L2 regularization to prevent overfitting
+        regularization_term = regularization * self.weights.data
+        
+        # Apply weight update
+        self.weights.data += adaptive_lr * total_update - regularization_term
+        
+        # Homeostatic bias adjustment with adaptive rate based on error
+        activity_diff = self.target_activity - recent_activation
+        bias_update_rate = self.homeostatic_rate * (1.0 + error_magnitude)
+        self.bias.data += bias_update_rate * activity_diff
+        
+        # Apply weight normalization
+        self.normalize_synapses()
+        
+        return torch.abs(total_update).mean().item()
+    def update_calcium_metaplasticity(self):
+        """
+        Update synaptic plasticity based on calcium levels to regulate learning.
+        """
+        # Get current calcium concentration
+        calcium = self.ion_channels.get_calcium_level()
+        
+        # Calculate calcium thresholds for LTP and LTD
+        ca_low = 0.2  # Low threshold (LTD)
+        ca_high = 0.7  # High threshold (LTP)
+        
+        # Calculate learning rate modulators based on calcium level
+        ltp_factor = torch.sigmoid((calcium - ca_high) * 10)  # Long-term potentiation
+        ltd_factor = torch.sigmoid((ca_low - calcium) * 10)   # Long-term depression
+        
+        # Store metaplasticity factors for weight updates
+        self.ltp_rate = ltp_factor
+        self.ltd_rate = ltd_factor
+        
+        # Calculate overall plasticity state (bell-shaped curve)
+        plasticity_state = ltp_factor + ltd_factor - ltp_factor * ltd_factor
+        
+        # Update neuron's learning properties
+        self.plasticity_factor = plasticity_state
+        
+        return plasticity_state
+
+    def process_neuromodulator_signals(self, neuromodulator_levels):
+        """
+        Process neuromodulator signals to adapt neuron behavior.
         
         Args:
-            error_signal: Error/reward signal
-            learning_rate: Base learning rate
+            neuromodulator_levels: Dictionary of neuromodulator levels
             
         Returns:
-            Weight update magnitude
+            dict: Updated neuron parameters
+        """
+        # Extract neuromodulator levels
+        dopamine = neuromodulator_levels.get('dopamine', 0.5)
+        serotonin = neuromodulator_levels.get('serotonin', 0.5)
+        norepinephrine = neuromodulator_levels.get('norepinephrine', 0.5)
+        acetylcholine = neuromodulator_levels.get('acetylcholine', 0.5)
+        
+        # Adjust learning rate based on dopamine (reward prediction)
+        # Higher dopamine increases learning for positive outcomes
+        learning_rate_mod = 0.5 + dopamine
+        
+        # Adjust threshold based on serotonin (mood/satisfaction)
+        # Higher serotonin raises threshold, making neuron more selective
+        threshold_mod = 0.3 + serotonin * 0.4
+        
+        # Adjust signal-to-noise ratio based on norepinephrine (attention)
+        # Higher norepinephrine increases contrast between strong and weak inputs
+        snr_mod = 0.8 + norepinephrine * 0.4
+        
+        # Adjust memory persistence based on acetylcholine (memory formation)
+        # Higher acetylcholine strengthens memory trace
+        memory_mod = 0.7 + acetylcholine * 0.6
+        
+        # Apply modulations to neuron parameters
+        self.learning_rate_multiplier = learning_rate_mod
+        self.activation_threshold = threshold_mod
+        self.signal_noise_ratio = snr_mod
+        self.memory_persistence = memory_mod
+        
+        # Return updated parameters
+        return {
+            'learning_rate_mod': learning_rate_mod,
+            'threshold_mod': threshold_mod,
+            'snr_mod': snr_mod,
+            'memory_mod': memory_mod
+        }
+
+    def normalize_synapses(self, method="l2"):
+        """
+        Normalize synapse weights to prevent dominance and improve generalization.
+        
+        Args:
+            method: Normalization method ("l2", "l1", or "max")
+        """
+        if method == "l2":
+            # L2 normalization
+            norm = torch.norm(self.weights, p=2)
+            if norm > 1.0:
+                self.weights.data = self.weights.data / norm
+        elif method == "l1":
+            # L1 normalization with scaling
+            norm = torch.sum(torch.abs(self.weights))
+            if norm > self.input_size * 0.5:  # Scale based on input size
+                self.weights.data = self.weights.data / (norm / (self.input_size * 0.5))
+        elif method == "max":
+            # Max normalization
+            max_val = torch.max(torch.abs(self.weights))
+            if max_val > 1.0:
+                self.weights.data = self.weights.data / max_val
+
+    def apply_homeostasis(self):
+        """
+        Apply homeostatic plasticity to maintain target activity levels.
+        """
+        # Calculate the average activity level
+        avg_activity = self.activation_history.mean()
+        
+        # Calculate the activity error (difference from target)
+        activity_error = self.target_activity - avg_activity
+        
+        # Scale bias to drive activity toward target
+        self.bias.data += self.homeostatic_rate * activity_error
+        
+        # Apply activity-dependent scaling to weights
+        if avg_activity > self.target_activity * 1.5:
+            # Globally scale down weights if too active
+            self.weights.data *= (1.0 - self.homeostatic_rate * 0.1)
+        elif avg_activity < self.target_activity * 0.5:
+            # Globally scale up weights if too inactive
+            self.weights.data *= (1.0 + self.homeostatic_rate * 0.1)
+        
+        # Regularize weights to prevent extreme values
+        weight_std = torch.std(self.weights)
+        weight_mean = torch.mean(self.weights)
+        outlier_mask = torch.abs(self.weights - weight_mean) > 3 * weight_std
+        # Pull outliers toward the mean
+        self.weights.data[outlier_mask] = self.weights.data[outlier_mask] * 0.95 + weight_mean * 0.05
+
+    def update_short_term_dynamics(self, input_activity):
+        """
+        Update short-term synaptic dynamics (facilitation and depression).
+        
+        Args:
+            input_activity: Presynaptic activity levels
         """
         with torch.no_grad():
-            # Skip update if not enough history
-            if len(self.input_history) < 10 or len(self.activation_records) < 10:
-                return 0.0
+            # Calculate input activity strength
+            if isinstance(input_activity, torch.Tensor):
+                input_strength = torch.mean(torch.abs(input_activity))
+            else:
+                input_strength = torch.tensor(0.5)  # Default if no input provided
             
-            # Track error
-            self.error_history.append(error_signal.detach().mean())
+            # Facilitation: increases with activity, saturates, decays slowly
+            facilitation_growth = 0.1 * torch.sigmoid(input_strength * 5 - 1)
+            facilitation_decay = 0.05 * self.synaptic_facilitation
+            self.synaptic_facilitation = torch.clamp(
+                self.synaptic_facilitation + facilitation_growth - facilitation_decay,
+                0.5, 2.0
+            )
             
-            # Calculate average recent input and activation
-            recent_inputs = torch.stack(list(self.input_history)[-10:]).mean(0)
-            recent_activation = torch.stack(list(self.activation_records)[-10:]).mean(0)
+            # Depression: increases with high activity, recovers slowly
+            depression_growth = 0.15 * torch.sigmoid(input_strength * 6 - 2)
+            depression_recovery = 0.02 * (1.0 - self.synaptic_depression)
+            self.synaptic_depression = torch.clamp(
+                self.synaptic_depression + depression_growth - depression_recovery,
+                0.2, 1.0
+            )
             
-            # Calcium modulation of learning rate
-            calcium_level = self.ion_channels.get_calcium_level().mean()
-            calcium_factor = torch.sigmoid(calcium_level * 5 - 1)  # Threshold effect
-            effective_lr = learning_rate * calcium_factor.item()
+            # Calculate the effective weight modifier
+            self.effective_weight_modifier = self.synaptic_facilitation * self.synaptic_depression
             
-            # Hebbian component (correlation between input and output)
-            hebbian_update = recent_activation * recent_inputs
-            
-            # Error-driven component
-            error_update = error_signal.detach().mean() * recent_inputs
-            
-            # Combine updates
-            total_update = hebbian_update * 0.5 + error_update * 0.5
-            
-            # Apply weight update scaled by learning rate
-            self.weights.data += effective_lr * total_update
-            
-            # Homeostatic bias adjustment to maintain target activity
-            activity_diff = self.target_activity - recent_activation
-            self.bias.data += self.homeostatic_rate * activity_diff
-            
-            # Weight normalization to prevent explosion
-            if torch.norm(self.weights.data) > 3.0:
-                self.weights.data = self.weights.data * 3.0 / torch.norm(self.weights.data)
-            
-            # Update utility based on contribution to error reduction
-            if len(self.error_history) > 10:
-                recent_errors = torch.tensor(list(self.error_history)[-10:])
-                error_improvement = recent_errors[0] - recent_errors[-1]
-                utility_update = torch.sigmoid(error_improvement * 5) - 0.5
-                self.utility = 0.9 * self.utility + 0.1 * utility_update
-            
-            return torch.abs(total_update).mean().item()
-
+            return self.effective_weight_modifier
 
 class BiologicalGRUCell(nn.Module):
     """
@@ -360,7 +499,7 @@ class BiologicalGRUCell(nn.Module):
         for neuron in self.update_gate_neurons + self.reset_gate_neurons + self.candidate_neurons:
             neuron.reset_state()
         
-    def forward(self, x, h=None, error_signal=None):
+    def forward(self, x, h=None, error_signal=None, neuromodulators=None):
         """
         Forward pass with biological neuron dynamics.
         
@@ -368,6 +507,7 @@ class BiologicalGRUCell(nn.Module):
             x: Input tensor [batch_size, input_size]
             h: Previous hidden state [batch_size, hidden_size]
             error_signal: Optional error signal for learning
+            neuromodulators: Optional neuromodulator levels
             
         Returns:
             New hidden state
@@ -389,9 +529,22 @@ class BiologicalGRUCell(nn.Module):
         reset_gate = torch.zeros(batch_size, self.hidden_size, device=x.device)
         candidate = torch.zeros(batch_size, self.hidden_size, device=x.device)
         
+        # Process neuromodulators if provided - apply to all neurons
+        if neuromodulators is not None:
+            for i in range(self.hidden_size):
+                if self.neuron_mask[i] > 0:  # Only process living neurons
+                    self.update_gate_neurons[i].process_neuromodulator_signals(neuromodulators)
+                    self.reset_gate_neurons[i].process_neuromodulator_signals(neuromodulators)
+                    self.candidate_neurons[i].process_neuromodulator_signals(neuromodulators)
+        
         # Process each neuron individually (allows for neuron-specific dynamics)
         for i in range(self.hidden_size):
             if self.neuron_mask[i] > 0:  # Only process living neurons
+                # Update short-term dynamics
+                self.update_gate_neurons[i].update_short_term_dynamics(xh)
+                self.reset_gate_neurons[i].update_short_term_dynamics(xh)
+                self.candidate_neurons[i].update_short_term_dynamics(xh)
+                
                 # Update gate
                 update_gate[:, i:i+1] = self.update_gate_neurons[i](xh)
                 
@@ -408,6 +561,10 @@ class BiologicalGRUCell(nn.Module):
         
         # Apply mask to hide dead neurons
         h_new = h_new * self.neuron_mask
+        
+        # Apply memory consolidation periodically (random chance)
+        if self.training and hasattr(self, 'consolidate_memory') and torch.rand(1).item() < 0.05:
+            self.consolidate_memory()
         
         # If in training mode and error signal provided, update neurons
         if self.training and error_signal is not None:
@@ -428,10 +585,27 @@ class BiologicalGRUCell(nn.Module):
             # Update neuron weights and health
             for i in range(self.hidden_size):
                 if self.neuron_mask[i] > 0:  # Only update living neurons
-                    # Update weights
-                    update_gate_change = self.update_gate_neurons[i].update_weights(error_signal, learning_rate)
-                    reset_gate_change = self.reset_gate_neurons[i].update_weights(error_signal, learning_rate)
-                    candidate_change = self.candidate_neurons[i].update_weights(error_signal, learning_rate)
+                    # Apply any neuromodulator adjustments to learning rate
+                    effective_lr = learning_rate
+                    if hasattr(self.update_gate_neurons[i], 'learning_rate_multiplier'):
+                        effective_lr *= self.update_gate_neurons[i].learning_rate_multiplier
+                    
+                    # Update calcium-based metaplasticity
+                    if hasattr(self.update_gate_neurons[i], 'update_calcium_metaplasticity'):
+                        self.update_gate_neurons[i].update_calcium_metaplasticity()
+                        self.reset_gate_neurons[i].update_calcium_metaplasticity()
+                        self.candidate_neurons[i].update_calcium_metaplasticity()
+                    
+                    # Update weights with adaptive learning rate
+                    update_gate_change = self.update_gate_neurons[i].update_weights(error_signal, effective_lr)
+                    reset_gate_change = self.reset_gate_neurons[i].update_weights(error_signal, effective_lr)
+                    candidate_change = self.candidate_neurons[i].update_weights(error_signal, effective_lr)
+                    
+                    # Apply homeostatic plasticity
+                    if hasattr(self.update_gate_neurons[i], 'apply_homeostasis'):
+                        self.update_gate_neurons[i].apply_homeostasis()
+                        self.reset_gate_neurons[i].apply_homeostasis()
+                        self.candidate_neurons[i].apply_homeostasis()
                     
                     # Update health
                     update_health = self.update_gate_neurons[i].update_health(error_signal.mean())
@@ -468,7 +642,6 @@ class BiologicalGRUCell(nn.Module):
                     self.candidate_neurons[idx] = BioNeuron(self.input_size + self.hidden_size)
                     
                     print(f"Neuron {idx.item()} regenerated")
-
 
 class BioGRU(nn.Module):
     """
@@ -589,7 +762,7 @@ class BioGRU(nn.Module):
             
             for i, layer in enumerate(self.layers):
                 h_i = hidden_states[i]
-                h_i = layer(layer_input, h_i)
+                h_i = layer(layer_input, h_i, neuromodulators=self.neuromodulator_levels)
                 new_hidden_states.append(h_i)
                 layer_input = h_i
                 
@@ -611,11 +784,64 @@ class BioGRU(nn.Module):
         # Stack outputs [batch_size, seq_len, output_size]
         outputs = torch.stack(outputs, dim=1)
         
+        # After processing all time steps, analyze neuron activity patterns
+        if self.training:
+            # Record activity distribution and diversity metrics
+            activity_mean = torch.mean(self.pathway_activity, dim=1)
+            activity_std = torch.std(self.pathway_activity, dim=1)
+            activation_ratio = torch.mean((self.pathway_activity > 0.1).float(), dim=1)
+            
+            # Store metrics for analysis and adaptation
+            self.activity_stats = {
+                'mean': activity_mean,
+                'std': activity_std,
+                'activation_ratio': activation_ratio
+            }
+            
+            # Check for problematic activity patterns
+            dead_layer = activation_ratio < 0.1  # Less than 10% of neurons active
+            saturated_layer = activation_ratio > 0.9  # More than 90% of neurons active
+            
+            # Apply corrections to problematic layers
+            for i in range(self.num_layers):
+                if dead_layer[i]:
+                    # Increase learning rates for dead layers to encourage activation
+                    self._adjust_layer_plasticity(i, increase_factor=1.5)
+                elif saturated_layer[i]:
+                    # Decrease learning rates for saturated layers
+                    self._adjust_layer_plasticity(i, increase_factor=0.7)
+        
         return outputs, hidden_states
+
+    def _adjust_layer_plasticity(self, layer_idx, increase_factor=1.0):
+        """
+        Adjust plasticity of a layer based on activity patterns.
+        
+        Args:
+            layer_idx: Index of the layer to adjust
+            increase_factor: Factor to increase/decrease plasticity
+        """
+        if layer_idx >= len(self.layers):
+            return
+            
+        layer = self.layers[layer_idx]
+        
+        # Ensure we're dealing with BiologicalGRUCell
+        if not isinstance(layer, BiologicalGRUCell):
+            return
+            
+        for neuron_array in [layer.update_gate_neurons, layer.reset_gate_neurons, layer.candidate_neurons]:
+            for neuron in neuron_array:
+                if hasattr(neuron, 'homeostatic_rate'):
+                    neuron.homeostatic_rate *= increase_factor
+                
+                # Also adjust learning rate multiplier if it exists
+                if hasattr(neuron, 'learning_rate_multiplier'):
+                    neuron.learning_rate_multiplier *= increase_factor
     
     def update_from_error(self, error_signal, learning_rate=0.01):
         """
-        Update all neurons based on error signal.
+        Update all neurons based on error signal with enhanced adaptation.
         
         Args:
             error_signal: Error/reward signal
@@ -628,19 +854,43 @@ class BioGRU(nn.Module):
         # Update neuromodulators
         self.update_neuromodulators(error=error_signal.mean().item())
         
-        # Modulate learning rate with acetylcholine
-        effective_lr = learning_rate * self.neuromodulator_levels['acetylcholine']
+        # Get adaptive learning rates from neuromodulators
+        dopamine_level = self.neuromodulator_levels.get('dopamine', 0.5)
+        acetylcholine_level = self.neuromodulator_levels.get('acetylcholine', 0.5)
         
-        # Update each layer
+        # Modulate learning rate with dopamine and acetylcholine
+        # Dopamine controls reward-based learning, acetylcholine controls memory formation
+        effective_lr = learning_rate * dopamine_level * acetylcholine_level
+        
+        # Use error magnitude to scale learning - larger errors get larger updates
+        error_magnitude = torch.abs(error_signal.mean()).item()
+        error_scaling = torch.clamp(torch.tensor(error_magnitude * 2), 0.5, 2.0).item()
+        effective_lr *= error_scaling
+        
+        # Update each layer with adapted learning rate
         for i, layer in enumerate(self.layers):
+            # Apply layer-specific scaling based on position in network
+            # Earlier layers typically need smaller learning rates
+            layer_scaling = 0.7 + 0.3 * (i / max(1, self.num_layers - 1))
+            layer_lr = effective_lr * layer_scaling
+            
+            # Apply the update to the layer
             layer_error = error_signal
-            layer._update_neurons(None, layer_error, effective_lr)
+            layer._update_neurons(None, layer_error, layer_lr)
         
-        # Update output neurons
+        # Update output neurons with the same adaptive learning rate
         for i, neuron in enumerate(self.output_neurons):
             neuron_error = error_signal[:, i:i+1] if error_signal.dim() > 1 else error_signal
             neuron.update_weights(neuron_error, effective_lr)
             neuron.update_health(error_signal.mean())
+            
+            # Apply homeostatic plasticity if available
+            if hasattr(neuron, 'apply_homeostasis'):
+                neuron.apply_homeostasis()
+            
+            # Update calcium-based metaplasticity if available
+            if hasattr(neuron, 'update_calcium_metaplasticity'):
+                neuron.update_calcium_metaplasticity()
     
     def get_health_report(self):
         """

@@ -54,6 +54,52 @@ class PersistentGRUController(nn.Module):
         
         # Persistent memory
         self.persistent_memory = None
+    def consolidate_memory(self, replay_samples=5):
+        """
+        Consolidate important patterns in persistent memory through replay.
+        
+        Args:
+            replay_samples: Number of historical samples to replay
+        """
+        # Skip if no persistent memory exists
+        if self.persistent_memory is None:
+            return
+        
+        # Initialize temporary replay storage if not exists
+        if not hasattr(self, 'input_history') or len(self.input_history) < replay_samples:
+            return
+        
+        # Select replay samples (evenly distributed across history)
+        indices = torch.linspace(0, len(self.input_history)-1, replay_samples).long()
+        replay_inputs = [self.input_history[i] for i in indices]
+        
+        # Initialize consolidated memory if not exists
+        if not hasattr(self, 'consolidated_memory'):
+            self.consolidated_memory = torch.zeros_like(self.persistent_memory)
+        
+        # Process each replay sample with the hidden state
+        original_memory = self.persistent_memory.clone()
+        reduced_plasticity = 0.3  # Lower learning rate for replay
+        
+        with torch.no_grad():
+            for replay_input in replay_inputs:
+                # Process input without updating main memory
+                projected_input = self.memory_projection(replay_input)
+                
+                # Compute importance of this pattern
+                importance = torch.sigmoid(torch.mean(torch.abs(projected_input)))
+                
+                # Update consolidated memory with important features
+                self.consolidated_memory = (
+                    self.consolidated_memory * 0.9 + 
+                    projected_input * 0.1 * importance
+                )
+            
+            # Blend consolidated memory into persistent memory
+            self.persistent_memory = (
+                original_memory * 0.8 + 
+                self.consolidated_memory * 0.2
+            )
     
     def init_hidden(self, batch_size, device):
         """

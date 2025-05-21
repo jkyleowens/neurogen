@@ -436,6 +436,66 @@ def test(model, test_loader, criterion, device):
         'loss': avg_loss,
         'accuracy': avg_accuracy
     }
+    
+def configure_neuron_optimization(model, config):
+    """
+    Apply neuron optimization configurations to the model.
+    
+    Args:
+        model: The BioGRU model instance
+        config: Configuration dictionary
+        
+    Returns:
+        model: Configured model
+    """
+    # Skip if neuron optimization not enabled
+    if not config.get('neuron_optimization', {}).get('enabled', False):
+        return model
+    
+    print("Applying neuron optimization configurations...")
+    opt_config = config['neuron_optimization']
+    
+    # Apply to each layer
+    if hasattr(model, 'layers'):
+        for layer_idx, layer in enumerate(model.layers):
+            # Skip non-BiologicalGRUCell layers
+            if not hasattr(layer, 'neuron_mask'):
+                continue
+                
+            for i in range(layer.hidden_size):
+                if layer.neuron_mask[i] > 0:
+                    for neuron in [layer.update_gate_neurons[i], layer.reset_gate_neurons[i], layer.candidate_neurons[i]]:
+                        # Set target activity
+                        neuron.target_activity = opt_config.get('target_activity', 0.15)
+                        
+                        # Set homeostatic rate
+                        neuron.homeostatic_rate = opt_config.get('homeostatic_rate', 0.01)
+                        
+                        # Apply plasticity settings
+                        if hasattr(neuron, 'hebbian_weight'):
+                            plasticity = opt_config.get('plasticity', {})
+                            neuron.hebbian_weight = plasticity.get('hebbian_weight', 0.3)
+                            neuron.error_weight = plasticity.get('error_weight', 0.7)
+                            
+                        # Apply synapse settings
+                        synapse = opt_config.get('synapse', {})
+                        if hasattr(neuron, 'synaptic_facilitation'):
+                            neuron.facilitation_rate = synapse.get('facilitation_rate', 0.1)
+                        if hasattr(neuron, 'synaptic_depression'):
+                            neuron.depression_rate = synapse.get('depression_rate', 0.2)
+    
+    # Apply to neuromodulator levels
+    if config.get('neuromodulator', {}):
+        neuromod_config = config['neuromodulator']
+        model.neuromodulator_levels = {
+            'dopamine': neuromod_config.get('dopamine_scale', 1.0),
+            'serotonin': neuromod_config.get('serotonin_scale', 1.0),
+            'norepinephrine': neuromod_config.get('norepinephrine_scale', 1.0),
+            'acetylcholine': neuromod_config.get('acetylcholine_scale', 1.0)
+        }
+    
+    print("Neuron optimization applied")
+    return model
 
 def main():
     """Main training function."""
@@ -471,6 +531,29 @@ def main():
     
     # Create model
     model = BrainInspiredNN(config).to(device)
+
+    # Apply neuron optimization if enabled
+    model = configure_neuron_optimization(model, config)
+
+    # Verify neuron configuration
+    if model.config.get('model', {}).get('use_bio_gru', False) and hasattr(model, 'controller'):
+        print("\nVerifying neuron configurations:")
+        if hasattr(model.controller, 'layers'):
+            sample_layer = model.controller.layers[0]
+            if hasattr(sample_layer, 'neuron_mask'):
+                sample_neuron = None
+                for i in range(sample_layer.hidden_size):
+                    if sample_layer.neuron_mask[i] > 0:
+                        sample_neuron = sample_layer.update_gate_neurons[i]
+                        break
+                
+                if sample_neuron is not None:
+                    print(f"  - Target activity: {sample_neuron.target_activity}")
+                    print(f"  - Homeostatic rate: {sample_neuron.homeostatic_rate}")
+                    if hasattr(sample_neuron, 'hebbian_weight'):
+                        print(f"  - Hebbian weight: {sample_neuron.hebbian_weight}")
+                    if hasattr(sample_neuron, 'synaptic_facilitation'):
+                        print(f"  - Has synaptic dynamics: Yes")
     
     # Pretraining logic
     if args.pretrain or config.get('pretraining', {}).get('enabled', False):

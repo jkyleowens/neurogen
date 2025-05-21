@@ -66,3 +66,19 @@ data:
   include_indicators: true  # Include technical indicators
   num_workers: 2  # DataLoader workers
   pin_memory: true  # Pin memory for faster data transfer to GPU
+
+# Neuron optimization parameters
+neuron_optimization:
+  enabled: true
+  target_activity: 0.15
+  homeostatic_rate: 0.01
+  health_decay: 0.99
+  death_threshold: 0.1
+  plasticity:
+    hebbian_weight: 0.3
+    error_weight: 0.7
+    regularization: 0.0001
+  synapse:
+    facilitation_rate: 0.1
+    depression_rate: 0.2
+    normalization: "l2"

@@ -113,6 +113,8 @@ class BrainInspiredNN(nn.Module):
         # Initialize hidden states
         self.hidden = None
         self.neurotransmitter_levels = None
+
+        self.configure_neurons()
         
     def forward(self, x, reward=None):
         """
@@ -218,6 +220,81 @@ class BrainInspiredNN(nn.Module):
         if reward is not None:
             self.update_weights(reward)
         return output
+    
+    def configure_neurons(self, config=None):
+        """
+        Configure neuron parameters for optimized performance.
+        
+        Args:
+            config: Configuration parameters (uses self.config if None)
+            
+        Returns:
+            self: For method chaining
+        """
+        if config is None:
+            config = self.config
+        
+        # Skip if neuron optimization not enabled
+        if not config.get('neuron_optimization', {}).get('enabled', False):
+            return self
+        
+        print("Configuring neurons for optimized performance...")
+        opt_config = config['neuron_optimization']
+        
+        # Configure BioGRU if it's being used
+        if self.config.get('model', {}).get('use_bio_gru', False) and hasattr(self, 'controller'):
+            if hasattr(self.controller, 'layers'):
+                for layer_idx, layer in enumerate(self.controller.layers):
+                    # Skip non-BiologicalGRUCell layers
+                    if not hasattr(layer, 'neuron_mask'):
+                        continue
+                        
+                    for i in range(layer.hidden_size):
+                        if layer.neuron_mask[i] > 0:
+                            for neuron in [layer.update_gate_neurons[i], layer.reset_gate_neurons[i], layer.candidate_neurons[i]]:
+                                # Set target activity
+                                neuron.target_activity = opt_config.get('target_activity', 0.15)
+                                
+                                # Set homeostatic rate
+                                neuron.homeostatic_rate = opt_config.get('homeostatic_rate', 0.01)
+                                
+                                # Apply plasticity settings
+                                if hasattr(neuron, 'hebbian_weight'):
+                                    plasticity = opt_config.get('plasticity', {})
+                                    neuron.hebbian_weight = plasticity.get('hebbian_weight', 0.3)
+                                    neuron.error_weight = plasticity.get('error_weight', 0.7)
+                                    
+                                # Apply synapse settings
+                                synapse = opt_config.get('synapse', {})
+                                if hasattr(neuron, 'synaptic_facilitation'):
+                                    neuron.facilitation_rate = synapse.get('facilitation_rate', 0.1)
+                                if hasattr(neuron, 'synaptic_depression'):
+                                    neuron.depression_rate = synapse.get('depression_rate', 0.2)
+            
+            # Configure output neurons if they exist
+            if hasattr(self.controller, 'output_neurons'):
+                for i, neuron in enumerate(self.controller.output_neurons):
+                    # Same configuration as for hidden neurons
+                    neuron.target_activity = opt_config.get('target_activity', 0.15)
+                    neuron.homeostatic_rate = opt_config.get('homeostatic_rate', 0.01)
+                    
+                    # Apply plasticity settings
+                    if hasattr(neuron, 'hebbian_weight'):
+                        plasticity = opt_config.get('plasticity', {})
+                        neuron.hebbian_weight = plasticity.get('hebbian_weight', 0.3)
+                        neuron.error_weight = plasticity.get('error_weight', 0.7)
+        
+        # Set health parameters
+        self.health_decay = opt_config.get('health_decay', 0.99)
+        self.death_threshold = opt_config.get('death_threshold', 0.1)
+        
+        # Apply to output layer
+        if hasattr(self, 'output_layer'):
+            # Nothing specific to configure for standard linear layer
+            pass
+        
+        print("Neuron configuration complete")
+        return self
 
     def update_weights(self, reward):
         """
@@ -381,6 +458,9 @@ class BrainInspiredNN(nn.Module):
             print("Neuromodulator pathway pretraining complete")
         
         print("\n=== Component Pretraining Complete ===\n")
+
+        self.configure_neurons()
+        
         return self
     
     @staticmethod
