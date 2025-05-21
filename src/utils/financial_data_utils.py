@@ -141,10 +141,10 @@ def add_technical_indicators(df):
     low = df['Low']
     volume = df['Volume']
     
-    # Moving Averages
-    result['MA5'] = close.rolling(window=5).mean()
-    result['MA10'] = close.rolling(window=10).mean()
-    result['MA20'] = close.rolling(window=20).mean()
+    # Moving Averages - ensure they're Series objects
+    result['MA5'] = pd.Series(close.rolling(window=5).mean(), index=close.index)
+    result['MA10'] = pd.Series(close.rolling(window=10).mean(), index=close.index)
+    result['MA20'] = pd.Series(close.rolling(window=20).mean(), index=close.index)
     
     # Relative Strength Index (RSI)
     delta = close.diff()
@@ -190,8 +190,19 @@ def add_technical_indicators(df):
     
     # Price to Moving Average Ratios
     # Use pandas division which ensures element-wise operation
-    result['Price_to_MA5'] = close / result['MA5']
-    result['Price_to_MA20'] = close / result['MA20']
+    # Ensure close is a Series to avoid DataFrame to Series assignment issues
+    if isinstance(close, pd.DataFrame) and close.shape[1] > 1:
+        close_series = close.iloc[:, 0]  # Take first column if DataFrame
+    else:
+        close_series = close  # Already a Series
+    
+    # Ensure MA5 and MA20 are Series objects, not DataFrames
+    ma5_series = result['MA5'].iloc[:, 0] if isinstance(result['MA5'], pd.DataFrame) else result['MA5']
+    ma20_series = result['MA20'].iloc[:, 0] if isinstance(result['MA20'], pd.DataFrame) else result['MA20']
+    
+    # Calculate price to moving average ratios
+    result['Price_to_MA5'] = close_series / ma5_series
+    result['Price_to_MA20'] = close_series / ma20_series
     
     # Handle any potential NaN values from division or other calculations
     result = result.replace([np.inf, -np.inf], np.nan)
