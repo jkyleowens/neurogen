@@ -579,8 +579,7 @@ def main():
     else:
         weight_decay = config['training'].get('weight_decay', 0.0)
         optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'], weight_decay=weight_decay)
-        print(f"Using standard backprop with Adam (lr={config['training']['learnin
-        +g+_rate']})")
+        print(f"Using standard backprop with Adam (lr={config['training']['learning_rate']})")
     
     # Define learning rate scheduler
     scheduler = None
