@@ -135,11 +135,22 @@ def add_technical_indicators(df):
     # Create copy to avoid modifying the original
     result = df.copy()
     
-    # Extract price data
+    # Extract price data and ensure they are Series, not DataFrames
     close = df['Close']
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]  # Take first column if DataFrame
+        
     high = df['High']
+    if isinstance(high, pd.DataFrame):
+        high = high.iloc[:, 0]
+        
     low = df['Low']
+    if isinstance(low, pd.DataFrame):
+        low = low.iloc[:, 0]
+        
     volume = df['Volume']
+    if isinstance(volume, pd.DataFrame):
+        volume = volume.iloc[:, 0]
     
     # Moving Averages - ensure they're Series objects
     result['MA5'] = pd.Series(close.rolling(window=5).mean(), index=close.index)
@@ -178,7 +189,9 @@ def add_technical_indicators(df):
     tr1 = high - low
     tr2 = abs(high - close.shift())
     tr3 = abs(low - close.shift())
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    # Create a DataFrame from the Series for max calculation
+    tr_df = pd.DataFrame({'tr1': tr1, 'tr2': tr2, 'tr3': tr3})
+    tr = tr_df.max(axis=1)
     result['ATR'] = tr.rolling(window=14).mean()
     
     # Price Rate of Change
@@ -189,20 +202,12 @@ def add_technical_indicators(df):
     result['Volume_Change'] = volume.pct_change() * 100
     
     # Price to Moving Average Ratios
-    # Use pandas division which ensures element-wise operation
-    # Ensure close is a Series to avoid DataFrame to Series assignment issues
-    if isinstance(close, pd.DataFrame) and close.shape[1] > 1:
-        close_series = close.iloc[:, 0]  # Take first column if DataFrame
-    else:
-        close_series = close  # Already a Series
-    
-    # Ensure MA5 and MA20 are Series objects, not DataFrames
-    ma5_series = result['MA5'].iloc[:, 0] if isinstance(result['MA5'], pd.DataFrame) else result['MA5']
-    ma20_series = result['MA20'].iloc[:, 0] if isinstance(result['MA20'], pd.DataFrame) else result['MA20']
+    # Since we've already ensured all our variables are Series, not DataFrames,
+    # we can directly calculate the price to moving average ratios
     
     # Calculate price to moving average ratios
-    result['Price_to_MA5'] = close_series / ma5_series
-    result['Price_to_MA20'] = close_series / ma20_series
+    result['Price_to_MA5'] = close / result['MA5']
+    result['Price_to_MA20'] = close / result['MA20']
     
     # Handle any potential NaN values from division or other calculations
     result = result.replace([np.inf, -np.inf], np.nan)
