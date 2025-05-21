@@ -86,11 +86,18 @@ def test_shape_fixes():
         if isinstance(output_2d, tuple):
             actual_output = output_2d[0]
             print(f"2D input: {x_2d.shape} -> output tuple with shape: {actual_output.shape}")
+            
+            # Test if loss calculation would work with tuple output
+            output_for_loss = reshape_output_for_loss(output_2d, y_2d)
+            print(f"Reshaped for loss (from tuple): {output_for_loss.shape}, target: {y_2d.shape}")
+            
+            # Test MSE loss
+            loss = torch.nn.MSELoss()(output_for_loss, y_2d)
+            print(f"Loss calculation successful: {loss.item()}")
         else:
             print(f"2D input: {x_2d.shape} -> output: {output_2d.shape}")
-        
-        # Test if loss calculation would work
-        if not isinstance(output_2d, tuple):
+            
+            # Test if loss calculation would work
             output_for_loss = reshape_output_for_loss(output_2d, y_2d)
             print(f"Reshaped for loss: {output_for_loss.shape}, target: {y_2d.shape}")
             
@@ -104,8 +111,30 @@ def test_shape_fixes():
         if isinstance(output_3d, tuple):
             actual_output = output_3d[0]
             print(f"3D input: {x_3d.shape} -> output tuple with shape: {actual_output.shape}")
+            
+            # Test if loss calculation would work with tuple output (different dimensions)
+            reshaped_output = reshape_output_for_loss(output_3d, y_2d)
+            print(f"3D input -> 2D target reshape: {reshaped_output.shape}, target: {y_2d.shape}")
+            
+            # Calculate loss with 2D target
+            loss = torch.nn.MSELoss()(reshaped_output, y_2d)
+            print(f"Loss calculation (3D->2D) successful: {loss.item()}")
+            
+            # Also test with matching dimensions
+            reshaped_output_3d = reshape_output_for_loss(output_3d, y_3d)
+            print(f"3D input -> 3D target reshape: {reshaped_output_3d.shape}, target: {y_3d.shape}")
+            loss_3d = torch.nn.MSELoss()(reshaped_output_3d, y_3d)
+            print(f"Loss calculation (3D->3D) successful: {loss_3d.item()}")
         else:
             print(f"3D input: {x_3d.shape} -> output: {output_3d.shape}")
+            
+            # Test reshaping with 2D target
+            reshaped_output = reshape_output_for_loss(output_3d, y_2d)
+            print(f"3D input -> 2D target reshape: {reshaped_output.shape}, target: {y_2d.shape}")
+            
+            # Calculate loss
+            loss = torch.nn.MSELoss()(reshaped_output, y_2d)
+            print(f"Loss calculation successful: {loss.item()}")
             
     except Exception as e:
         print(f"Error with fixes: {e}")

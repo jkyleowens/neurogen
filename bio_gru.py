@@ -793,8 +793,11 @@ class BioGRU(nn.Module):
         Returns:
             Output sequence and final hidden states
         """
+        # Store original input dimensionality to return consistent output
+        original_dim = x.dim()
+        
         # Handle both 2D and 3D inputs
-        if x.dim() == 2:
+        if original_dim == 2:
             # Add a time dimension (batch_size, input_size) -> (batch_size, 1, input_size)
             x = x.unsqueeze(1)
             is_2d_input = True
