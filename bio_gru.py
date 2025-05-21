@@ -183,12 +183,18 @@ class BioNeuron(nn.Module):
         Forward pass with biophysical simulation.
         
         Args:
-            x: Input signal
+            x: Input signal (can be 2D [batch, features] or 3D [batch, seq, features])
             previous_activity: Previous activation state
             
         Returns:
             Neuron activation
         """
+        # Handle 3D inputs by reshaping
+        original_shape = x.shape
+        if x.dim() > 2:
+            # Flatten the first dimensions to create a 2D tensor
+            x = x.reshape(-1, x.size(-1))
+        
         # Store input for plasticity
         if self.training:
             self.input_history.append(x.detach().mean(0))
@@ -196,8 +202,13 @@ class BioNeuron(nn.Module):
         # Apply short-term plasticity to inputs
         effective_weights = self.weights * self.synaptic_facilitation * self.synaptic_depression
         
-        # Calculate weighted input
-        weighted_input = F.linear(x, effective_weights.unsqueeze(0), self.bias)
+        # Calculate weighted input - force correct dimensions
+        if effective_weights.dim() > 1:
+            # Already multi-dimensional
+            weighted_input = F.linear(x, effective_weights, self.bias)
+        else:
+            # Make it 2D [1, features]
+            weighted_input = F.linear(x, effective_weights.unsqueeze(0), self.bias)
         
         # Pass through ion channels to get membrane potential
         membrane_potential = self.ion_channels(weighted_input, previous_activity)
@@ -214,18 +225,48 @@ class BioNeuron(nn.Module):
         
         # Update activation history
         if self.training:
-            self.activation_records.append(activation.detach().mean(0))
-            # Shift activation history and add new activation
-            self.activation_history = torch.cat([self.activation_history[1:], activation.detach().mean(0).unsqueeze(0)])
-            self.activation_count += activation.detach().mean() > 0.1
+            # Handle different input dimensions
+            if activation.dim() > 1:
+                act_mean = activation.detach().mean(0)
+                act_val = activation.detach().mean().item()
+            else:
+                act_mean = activation.detach()
+                act_val = activation.detach().mean().item()
+                
+            self.activation_records.append(act_mean)
+            
+            # Ensure consistent dimensions for concatenation
+            if self.activation_history.dim() == 1:
+                # Shift activation history and add new activation as a scalar
+                if act_mean.dim() == 0:
+                    new_val = act_mean.unsqueeze(0)
+                else:
+                    new_val = act_mean.mean().unsqueeze(0)
+                self.activation_history = torch.cat([self.activation_history[1:], new_val])
+            else:
+                # Handle multi-dimensional case
+                if act_mean.dim() == 0:
+                    new_val = act_mean.reshape(1, 1)
+                else:
+                    new_val = act_mean.reshape(1, -1)
+                self.activation_history = torch.cat([self.activation_history[1:], new_val])
+                
+            self.activation_count += (act_val > 0.1)
         
         # Update short-term plasticity
         if self.training:
             # Synaptic facilitation (increases with activity)
-            self.synaptic_facilitation = self.synaptic_facilitation * 0.95 + 0.05 * activation.detach().mean(0).unsqueeze(-1)
+            mean_act = activation.detach().mean(0) if activation.dim() > 0 else activation.detach()
+            self.synaptic_facilitation = self.synaptic_facilitation * 0.95 + 0.05 * mean_act.unsqueeze(-1)
             # Synaptic depression (decreases with activity)
-            self.synaptic_depression = self.synaptic_depression * 0.98 + 0.02 * (1 - activation.detach().mean(0).unsqueeze(-1))
+            self.synaptic_depression = self.synaptic_depression * 0.98 + 0.02 * (1 - mean_act.unsqueeze(-1))
         
+        # Restore original shape if input was 3D
+        if 'original_shape' in locals() and len(original_shape) > 2 and activation.dim() < len(original_shape):
+            # Calculate the new shape based on the original input dimensions
+            new_shape = list(original_shape[:-1]) + [-1]
+            activation = activation.reshape(new_shape)
+            
         return activation
     
     def update_health(self, reward=None, activity_threshold=0.05):
@@ -504,7 +545,7 @@ class BiologicalGRUCell(nn.Module):
         Forward pass with biological neuron dynamics.
         
         Args:
-            x: Input tensor [batch_size, input_size]
+            x: Input tensor [batch_size, input_size] or [batch_size, seq_len, input_size]
             h: Previous hidden state [batch_size, hidden_size]
             error_signal: Optional error signal for learning
             neuromodulators: Optional neuromodulator levels
@@ -512,6 +553,15 @@ class BiologicalGRUCell(nn.Module):
         Returns:
             New hidden state
         """
+        # Handle multi-dimensional inputs
+        original_shape = x.shape
+        is_3d_input = False
+        
+        if x.dim() > 2:
+            is_3d_input = True
+            # For 3D input, we'll process the last timestep
+            x = x[:, -1] if x.size(1) > 0 else x.squeeze(1)
+            
         batch_size = x.size(0)
         
         # Initialize hidden state if needed
@@ -737,12 +787,20 @@ class BioGRU(nn.Module):
         Forward pass through all layers with biological dynamics.
         
         Args:
-            x: Input sequence [batch_size, seq_len, input_size]
+            x: Input sequence either [batch_size, seq_len, input_size] or [batch_size, input_size]
             hidden_states: Optional initial hidden states
             
         Returns:
             Output sequence and final hidden states
         """
+        # Handle both 2D and 3D inputs
+        if x.dim() == 2:
+            # Add a time dimension (batch_size, input_size) -> (batch_size, 1, input_size)
+            x = x.unsqueeze(1)
+            is_2d_input = True
+        else:
+            is_2d_input = False
+            
         batch_size, seq_len, _ = x.size()
         
         # Initialize or use provided hidden states

@@ -78,12 +78,14 @@ class BrainInspiredNN(nn.Module):
 
         # Initialize controller (choose bio GRU if configured)
         if self.config.get('model', {}).get('use_bio_gru', False):
-            # Use the biological GRU
+            # Use the biological GRU - NOTE: Force hidden_size as output_size to avoid shape mismatches
             self.controller = BioGRU(
                 input_size=self.input_size,
                 hidden_size=self.hidden_size,
                 num_layers=self.num_layers,
-                output_size=self.output_size
+                # Important: Force output_size to match hidden_size to avoid shape mismatch
+                # The final projection to the desired output_size will be handled by self.output_layer
+                output_size=self.hidden_size  
             )
         else:
             # Use standard persistent GRU

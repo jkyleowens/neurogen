@@ -137,33 +137,25 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
             # Forward pass
             output = model(data)
             
-            # Handle dimension mismatches
-            if output.dim() == 3 and target.dim() == 2:
-                # If model outputs a sequence, take the last time step
-                output_for_loss = output[:, -1, :]
-            elif output.shape != target.shape:
+            # Import shape utils for fixing dimensions only when needed
+            if output.shape != target.shape:
                 # Log the shape mismatch
                 print(f"Shape mismatch: output {output.shape}, target {target.shape}")
                 
-                # Find common dimensions
-                batch_size = min(output.size(0), target.size(0))
-                if output.dim() > 1 and target.dim() > 1:
-                    out_features = output.size(-1)
-                    target_features = target.size(-1)
-                    features = min(out_features, target_features)
-                    
-                    # Trim both tensors to common dimensions
-                    if output.dim() >= 3:
-                        output_for_loss = output[:batch_size, -1, :features]
-                    else:
-                        output_for_loss = output[:batch_size, :features]
-                    
-                    target = target[:batch_size, :features]
+                # Use the fixed shape utils
+                from src.utils.shape_error_fix import reshape_output_for_loss
+                output_for_loss = reshape_output_for_loss(output, target)
+                
+                # Verify the fix worked
+                if output_for_loss.shape == target.shape:
+                    print(f"Shape fixed: {output_for_loss.shape}")
                 else:
-                    # Handle scalar case or other extreme mismatches
-                    print("Severe shape mismatch - using placeholder loss")
-                    output_for_loss = output.reshape(-1)[:1]
-                    target = target.reshape(-1)[:1]
+                    print(f"WARNING: Shape fix failed. Output: {output_for_loss.shape}, Target: {target.shape}")
+                    # Emergency shape fix - force the correct shape
+                    if target.shape[1] == 1 and output_for_loss.shape[1] > 1:
+                        # If target is a single column but output has multiple columns, keep only the first column
+                        output_for_loss = output_for_loss[:, 0:1]
+                        print(f"Emergency fix applied: {output_for_loss.shape}")
             else:
                 output_for_loss = output
             
@@ -237,29 +229,16 @@ def validate(model, val_loader, criterion, device):
                 # Forward pass
                 output = model(data)
                 
-                # Handle dimension mismatches
-                if output.dim() == 3 and target.dim() == 2:
-                    # If model outputs a sequence, take the last time step
-                    output_for_loss = output[:, -1, :]
-                elif output.shape != target.shape:
-                    # Find common dimensions
-                    batch_size = min(output.size(0), target.size(0))
-                    if output.dim() > 1 and target.dim() > 1:
-                        out_features = output.size(-1)
-                        target_features = target.size(-1)
-                        features = min(out_features, target_features)
-                        
-                        # Trim both tensors to common dimensions
-                        if output.dim() >= 3:
-                            output_for_loss = output[:batch_size, -1, :features]
-                        else:
-                            output_for_loss = output[:batch_size, :features]
-                        
-                        target = target[:batch_size, :features]
-                    else:
-                        # Handle scalar case or other extreme mismatches
-                        output_for_loss = output.reshape(-1)[:1]
-                        target = target.reshape(-1)[:1]
+                # Handle dimension mismatches using the same shape fix as in train_epoch
+                if output.shape != target.shape:
+                    # Use the fixed shape utils
+                    from src.utils.shape_error_fix import reshape_output_for_loss
+                    output_for_loss = reshape_output_for_loss(output, target)
+                    
+                    # Emergency fix for the common case in the error logs
+                    if target.shape[1] == 1 and output_for_loss.shape[1] > 1:
+                        # If target is a single column but output has multiple columns, keep only the first column
+                        output_for_loss = output_for_loss[:, 0:1]
                 else:
                     output_for_loss = output
                 
@@ -529,7 +508,7 @@ def main():
         print(f"Adjusting model input size from {config['model']['input_size']} to {input_features} based on data")
         config['model']['input_size'] = input_features
     
-    # Create model
+    # Create model and apply shape fixes 
     model = BrainInspiredNN(config).to(device)
 
     # Apply neuron optimization if enabled
@@ -554,6 +533,14 @@ def main():
                         print(f"  - Hebbian weight: {sample_neuron.hebbian_weight}")
                     if hasattr(sample_neuron, 'synaptic_facilitation'):
                         print(f"  - Has synaptic dynamics: Yes")
+    
+    # Apply shape error fixes to prevent dimension mismatches during training
+    from src.utils.shape_error_fix import apply_fixes
+    model = apply_fixes(model)
+    
+    # Configure the model to expect output_size-shaped targets
+    if hasattr(model, 'configure_shape_awareness'):
+        model.configure_shape_awareness(target_shape=(model.output_size,), auto_adjust=True)
     
     # Pretraining logic
     if args.pretrain or config.get('pretraining', {}).get('enabled', False):
@@ -592,7 +579,8 @@ def main():
     else:
         weight_decay = config['training'].get('weight_decay', 0.0)
         optimizer = optim.Adam(model.parameters(), lr=config['training']['learning_rate'], weight_decay=weight_decay)
-        print(f"Using standard backprop with Adam (lr={config['training']['learning_rate']})")
+        print(f"Using standard backprop with Adam (lr={config['training']['learnin
+        +g+_rate']})")
     
     # Define learning rate scheduler
     scheduler = None
