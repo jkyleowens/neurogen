@@ -17,7 +17,7 @@ from src.model import BrainInspiredNN
 from src.utils.memory_utils import optimize_memory_usage, print_gpu_memory_status
 from src.utils.performance_report import generate_performance_report
 from src.utils.reset_model_state import reset_model_state
-from src.utils.shape_error_fix import apply_fixes
+from src.utils.shape_error_fix import quick_fix_model
 
 # Try to import enhanced utilities with fallbacks
 try:
@@ -503,7 +503,7 @@ def main():
     # Create and configure model
     try:
         model = BrainInspiredNN(config).to(device)
-        model = apply_fixes(model)
+        model = quick_fix_model(model)
         
         total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f"Model created with {total_params:,} parameters")

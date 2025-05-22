@@ -540,86 +540,71 @@ class BiologicalGRUCell(nn.Module):
         for neuron in self.update_gate_neurons + self.reset_gate_neurons + self.candidate_neurons:
             neuron.reset_state()
         
-    def forward(self, x, h=None, error_signal=None, neuromodulators=None):
-        """
-        Forward pass with biological neuron dynamics.
-        
-        Args:
-            x: Input tensor [batch_size, input_size] or [batch_size, seq_len, input_size]
-            h: Previous hidden state [batch_size, hidden_size]
-            error_signal: Optional error signal for learning
-            neuromodulators: Optional neuromodulator levels
-            
-        Returns:
-            New hidden state
-        """
-        # Handle multi-dimensional inputs
+# Inside class BiologicalGRUCell(nn.Module):
+    # ... (other methods) ...
+
+    def forward(self, x, h=None, error_signal=None, neuromodulators=None): # Add error_signal=None
         original_shape = x.shape
-        is_3d_input = False
-        
-        if x.dim() > 2:
-            is_3d_input = True
-            # For 3D input, we'll process the last timestep
+        is_3d_input = x.dim() > 2
+
+        current_device = x.device
+        if h is not None: h = h.to(current_device)
+
+        if is_3d_input:
             x = x[:, -1] if x.size(1) > 0 else x.squeeze(1)
-            
+
         batch_size = x.size(0)
-        
-        # Initialize hidden state if needed
+
         if h is None:
-            h = torch.zeros(batch_size, self.hidden_size, device=x.device)
-        
-        # Concatenate input and hidden state
-        xh = torch.cat([x, h], dim=1)
-        
-        # Apply neuron mask to hide dead neurons
+            h = torch.zeros(batch_size, self.hidden_size, device=current_device)
+
+        self.neuron_mask = self.neuron_mask.to(current_device) # Ensure mask is on correct device
         masked_h = h * self.neuron_mask
-        
-        # Gate computations
-        update_gate = torch.zeros(batch_size, self.hidden_size, device=x.device)
-        reset_gate = torch.zeros(batch_size, self.hidden_size, device=x.device)
-        candidate = torch.zeros(batch_size, self.hidden_size, device=x.device)
-        
-        # Process neuromodulators if provided - apply to all neurons
+
+        xh = torch.cat([x, masked_h], dim=1)
+
+        xh_update_norm = self.ln_xh_update(xh)
+        xh_reset_norm = self.ln_xh_reset(xh)
+
+        update_gate_out = torch.zeros(batch_size, self.hidden_size, device=current_device)
+        reset_gate_out = torch.zeros(batch_size, self.hidden_size, device=current_device)
+        candidate_out = torch.zeros(batch_size, self.hidden_size, device=current_device)
+
         if neuromodulators is not None:
             for i in range(self.hidden_size):
-                if self.neuron_mask[i] > 0:  # Only process living neurons
-                    self.update_gate_neurons[i].process_neuromodulator_signals(neuromodulators)
-                    self.reset_gate_neurons[i].process_neuromodulator_signals(neuromodulators)
-                    self.candidate_neurons[i].process_neuromodulator_signals(neuromodulators)
-        
-        # Process each neuron individually (allows for neuron-specific dynamics)
+                if self.neuron_mask[i] > 0:
+                    for neuron_group in [self.update_gate_neurons, self.reset_gate_neurons, self.candidate_neurons]:
+                       if hasattr(neuron_group[i], 'process_neuromodulator_signals'):
+                            neuron_group[i].process_neuromodulator_signals(neuromodulators)
+
         for i in range(self.hidden_size):
-            if self.neuron_mask[i] > 0:  # Only process living neurons
-                # Update short-term dynamics
-                self.update_gate_neurons[i].update_short_term_dynamics(xh)
-                self.reset_gate_neurons[i].update_short_term_dynamics(xh)
-                self.candidate_neurons[i].update_short_term_dynamics(xh)
-                
-                # Update gate
-                update_gate[:, i:i+1] = self.update_gate_neurons[i](xh)
-                
-                # Reset gate
-                reset_gate[:, i:i+1] = self.reset_gate_neurons[i](xh)
-                
-                # Candidate state (with reset gate applied)
-                reset_hidden = reset_gate[:, i:i+1] * h[:, i:i+1]
-                candidate_input = torch.cat([x, reset_hidden], dim=1)
-                candidate[:, i:i+1] = self.candidate_neurons[i](candidate_input)
-        
-        # Combine gates to get new hidden state (standard GRU formula)
-        h_new = (1 - update_gate) * h + update_gate * candidate
-        
-        # Apply mask to hide dead neurons
+            if self.neuron_mask[i] > 0:
+                update_gate_out[:, i:i+1] = self.update_gate_neurons[i](xh_update_norm)
+                reset_gate_out[:, i:i+1] = self.reset_gate_neurons[i](xh_reset_norm)
+
+                reset_h_component = reset_gate_out[:, i:i+1] * masked_h[:, i:i+1]
+                # Using normalized components for candidate state's input
+                # Ensure ln_x_candidate and ln_h_candidate output shapes that cat to input_size + hidden_size
+                # This part of candidate_input formation needs to be consistent with BioNeuron's expected input_size
+                # Assuming BioNeuron in candidate_neurons is (input_size + hidden_size)
+                # Corrected candidate input to use individual components that are then handled by BioNeuron:
+                # x_norm_cand = self.ln_x_candidate(x) # this is [B, input_size]
+                # reset_h_norm_cand = self.ln_h_candidate(reset_h_component) # this is [B, 1] if h is sliced, need [B, hidden_size]
+                # This requires careful slicing or BioNeuron that takes sliced input.
+                # Simpler: candidate BioNeuron input should be cat of x and reset_h_component
+                candidate_input_raw = torch.cat([x, reset_h_component], dim=1) # Concatenate raw, BioNeuron will handle
+                candidate_out[:, i:i+1] = self.candidate_neurons[i](candidate_input_raw)
+
+
+        h_new = (1 - update_gate_out) * masked_h + update_gate_out * candidate_out
+        h_new = self.ln_h_new(h_new)
         h_new = h_new * self.neuron_mask
-        
-        # Apply memory consolidation periodically (random chance)
-        if self.training and hasattr(self, 'consolidate_memory') and torch.rand(1).item() < 0.05:
-            self.consolidate_memory()
-        
-        # If in training mode and error signal provided, update neurons
-        if self.training and error_signal is not None:
-            self._update_neurons(xh, error_signal)
-        
+
+        if self.training:
+            if error_signal is not None:
+                 self._update_neurons(xh_update_norm, error_signal) 
+            self._manage_neuron_lifecycle()
+
         return h_new
     
     def _update_neurons(self, inputs, error_signal, learning_rate=0.01):
@@ -782,97 +767,69 @@ class BioGRU(nn.Module):
         for key in self.neuromodulator_levels:
             self.neuromodulator_levels[key] = max(0.1, min(1.0, self.neuromodulator_levels[key]))
     
-    def forward(self, x, hidden_states=None):
-        """
-        Forward pass through all layers with biological dynamics.
-        
-        Args:
-            x: Input sequence either [batch_size, seq_len, input_size] or [batch_size, input_size]
-            hidden_states: Optional initial hidden states
-            
-        Returns:
-            Output sequence and final hidden states
-        """
-        # Store original input dimensionality to return consistent output
+# Inside class BioGRU(nn.Module):
+    # ... (other methods) ...
+
+    def forward(self, x, hidden_states_init=None, error_signal_for_update=None): # Add error_signal_for_update=None
         original_dim = x.dim()
-        
-        # Handle both 2D and 3D inputs
+        current_device = x.device
+
         if original_dim == 2:
-            # Add a time dimension (batch_size, input_size) -> (batch_size, 1, input_size)
-            x = x.unsqueeze(1)
-            is_2d_input = True
-        else:
-            is_2d_input = False
-            
+            x = x.unsqueeze(1) 
+
         batch_size, seq_len, _ = x.size()
-        
-        # Initialize or use provided hidden states
-        if hidden_states is None:
-            if self.hidden_states is None:
-                self.hidden_states = [None] * self.num_layers
-            hidden_states = self.hidden_states
-        
-        # Process each time step
-        outputs = []
+
+        if hidden_states_init is None:
+            if self.hidden_states is None or self.hidden_states[0].size(0) != batch_size:
+                self.hidden_states = [torch.zeros(batch_size, self.hidden_size, device=current_device) for _ in range(self.num_layers)]
+            current_h_states = self.hidden_states
+        else:
+            current_h_states = [h.to(current_device) for h in hidden_states_init]
+
+        output_sequence = []
+
         for t in range(seq_len):
             x_t = x[:, t, :]
-            
-            # Process through each layer
             layer_input = x_t
-            new_hidden_states = []
-            
+            new_h_for_step = []
+
             for i, layer in enumerate(self.layers):
-                h_i = hidden_states[i]
-                h_i = layer(layer_input, h_i, neuromodulators=self.neuromodulator_levels)
-                new_hidden_states.append(h_i)
-                layer_input = h_i
-                
-                # Record pathway activity for analysis
-                if self.training:
-                    self.pathway_activity[i] = 0.9 * self.pathway_activity[i] + 0.1 * h_i.detach().abs().mean(0)
-            
-            # Update hidden states
-            hidden_states = new_hidden_states
-            self.hidden_states = hidden_states
-            
-            # Process through output neurons
-            output = torch.zeros(batch_size, self.output_size, device=x.device)
-            for i in range(self.output_size):
-                output[:, i:i+1] = self.output_neurons[i](hidden_states[-1])
-            
-            outputs.append(output)
-        
-        # Stack outputs [batch_size, seq_len, output_size]
-        outputs = torch.stack(outputs, dim=1)
-        
-        # After processing all time steps, analyze neuron activity patterns
-        if self.training:
-            # Record activity distribution and diversity metrics
-            activity_mean = torch.mean(self.pathway_activity, dim=1)
-            activity_std = torch.std(self.pathway_activity, dim=1)
-            activation_ratio = torch.mean((self.pathway_activity > 0.1).float(), dim=1)
-            
-            # Store metrics for analysis and adaptation
-            self.activity_stats = {
-                'mean': activity_mean,
-                'std': activity_std,
-                'activation_ratio': activation_ratio
-            }
-            
-            # Check for problematic activity patterns
-            dead_layer = activation_ratio < 0.1  # Less than 10% of neurons active
-            saturated_layer = activation_ratio > 0.9  # More than 90% of neurons active
-            
-            # Apply corrections to problematic layers
-            for i in range(self.num_layers):
-                if dead_layer[i]:
-                    # Increase learning rates for dead layers to encourage activation
-                    self._adjust_layer_plasticity(i, increase_factor=1.5)
-                elif saturated_layer[i]:
-                    # Decrease learning rates for saturated layers
-                    self._adjust_layer_plasticity(i, increase_factor=0.7)
-        
-        return outputs, hidden_states
+                h_layer_prev = current_h_states[i]
+                # Pass the error_signal to the BiologicalGRUCell layer
+                h_layer_new = layer(layer_input, h_layer_prev, 
+                                    error_signal=error_signal_for_update if self.training else None, 
+                                    neuromodulators=self.neuromodulator_levels)
+                new_h_for_step.append(h_layer_new)
+                layer_input = h_layer_new
+
+            current_h_states = new_h_for_step
+
+            if self.training: # Pathway activity update logic
+                for i in range(self.num_layers):
+                    if hasattr(self.pathway_activity, 'device') and self.pathway_activity.device == current_device:
+                         self.pathway_activity[i] = 0.9 * self.pathway_activity[i] + \
+                                                   0.1 * current_h_states[i].detach().abs().mean(0)
+                    else: # Initialize or move if device mismatch or first time
+                         self.pathway_activity = self.pathway_activity.to(current_device)
+                         self.pathway_activity[i] = 0.9 * self.pathway_activity[i] + \
+                                                   0.1 * current_h_states[i].detach().abs().mean(0)
+
+
+            last_layer_h = current_h_states[-1]
+            if isinstance(self.output_neurons, BioNeuron):
+                 step_output = self.output_neurons(last_layer_h)
+            else:
+                 step_output = self.output_neurons(last_layer_h)
+            output_sequence.append(step_output)
+
+        self.hidden_states = current_h_states
+
+        outputs = torch.stack(output_sequence, dim=1)
+
+        if original_dim == 2:
+            outputs = outputs.squeeze(1)
+
+        return outputs, self.hidden_states
 
     def _adjust_layer_plasticity(self, layer_idx, increase_factor=1.0):
         """
@@ -1052,75 +1009,143 @@ class BioGRU(nn.Module):
                 pathway_info['layer_connectivity'].append(layer_connectivity)
         
         return pathway_info
+# Inside class BiologicalGRUCell(nn.Module):
+# ... (other methods) ...
+
+    def forward(self, x, h=None, error_signal=None, neuromodulators=None): # Add error_signal=None
+        original_shape = x.shape
+        is_3d_input = x.dim() > 2
+
+        current_device = x.device
+        if h is not None: h = h.to(current_device)
+
+        if is_3d_input:
+            x = x[:, -1] if x.size(1) > 0 else x.squeeze(1)
+
+        batch_size = x.size(0)
+
+        if h is None:
+            h = torch.zeros(batch_size, self.hidden_size, device=current_device)
+
+        self.neuron_mask = self.neuron_mask.to(current_device) # Ensure mask is on correct device
+        masked_h = h * self.neuron_mask
+
+        xh = torch.cat([x, masked_h], dim=1)
+
+        xh_update_norm = self.ln_xh_update(xh)
+        xh_reset_norm = self.ln_xh_reset(xh)
+
+        update_gate_out = torch.zeros(batch_size, self.hidden_size, device=current_device)
+        reset_gate_out = torch.zeros(batch_size, self.hidden_size, device=current_device)
+        candidate_out = torch.zeros(batch_size, self.hidden_size, device=current_device)
+
+        if neuromodulators is not None:
+            for i in range(self.hidden_size):
+                if self.neuron_mask[i] > 0:
+                    for neuron_group in [self.update_gate_neurons, self.reset_gate_neurons, self.candidate_neurons]:
+                       if hasattr(neuron_group[i], 'process_neuromodulator_signals'):
+                            neuron_group[i].process_neuromodulator_signals(neuromodulators)
+
+        for i in range(self.hidden_size):
+            if self.neuron_mask[i] > 0:
+                update_gate_out[:, i:i+1] = self.update_gate_neurons[i](xh_update_norm)
+                reset_gate_out[:, i:i+1] = self.reset_gate_neurons[i](xh_reset_norm)
+
+                reset_h_component = reset_gate_out[:, i:i+1] * masked_h[:, i:i+1]
+                # Using normalized components for candidate state's input
+                # Ensure ln_x_candidate and ln_h_candidate output shapes that cat to input_size + hidden_size
+                # This part of candidate_input formation needs to be consistent with BioNeuron's expected input_size
+                # Assuming BioNeuron in candidate_neurons is (input_size + hidden_size)
+                # Corrected candidate input to use individual components that are then handled by BioNeuron:
+                # x_norm_cand = self.ln_x_candidate(x) # this is [B, input_size]
+                # reset_h_norm_cand = self.ln_h_candidate(reset_h_component) # this is [B, 1] if h is sliced, need [B, hidden_size]
+                # This requires careful slicing or BioNeuron that takes sliced input.
+                # Simpler: candidate BioNeuron input should be cat of x and reset_h_component
+                candidate_input_raw = torch.cat([x, reset_h_component], dim=1) # Concatenate raw, BioNeuron will handle
+                candidate_out[:, i:i+1] = self.candidate_neurons[i](candidate_input_raw)
 
 
-def train_biogru(model, dataloader, epochs=5, learning_rate=0.01):
-    """
-    Train the BioGRU model with local learning rules.
-    
-    Args:
-        model: BioGRU model
-        dataloader: DataLoader with training data
-        epochs: Number of training epochs
-        learning_rate: Base learning rate
+        h_new = (1 - update_gate_out) * masked_h + update_gate_out * candidate_out
+        h_new = self.ln_h_new(h_new)
+        h_new = h_new * self.neuron_mask
+
+        if self.training:
+            if error_signal is not None:
+                 self._update_neurons(xh_update_norm, error_signal) 
+            self._manage_neuron_lifecycle()
+
+        return h_new
+
+
+    def train_biogru(model, dataloader, epochs=5, learning_rate=0.01):
+        """
+        Train the BioGRU model with local learning rules.
         
-    Returns:
-        Training history
-    """
-    model.train()
-    history = {
-        'loss': [],
-        'neuron_health': []
-    }
-    
-    # MSE loss function
-    criterion = nn.MSELoss()
-    
-    for epoch in range(epochs):
-        epoch_loss = 0
-        
-        for batch_idx, (data, target) in enumerate(dataloader):
-            # Reset model state for each sequence
-            model.reset_state()
+        Args:
+            model: BioGRU model
+            dataloader: DataLoader with training data
+            epochs: Number of training epochs
+            learning_rate: Base learning rate
             
-            # Forward pass
-            output, _ = model(data)
-            
-            # Calculate loss
-            loss = criterion(output, target)
-            epoch_loss += loss.item()
-            
-            # Calculate error signal for local update
-            error_signal = target - output
-            
-            # Update model with error signal
-            model.update_from_error(error_signal, learning_rate)
-            
-            # Report progress
-            if (batch_idx + 1) % 10 == 0:
-                print(f"Epoch {epoch+1}/{epochs}, Batch {batch_idx+1}/{len(dataloader)}, Loss: {loss.item():.6f}")
+        Returns:
+            Training history
+        """
+        model.train()
+        history = {
+            'loss': [],
+            'neuron_health': []
+        }
         
-        # Calculate epoch average loss
-        avg_loss = epoch_loss / len(dataloader)
-        history['loss'].append(avg_loss)
+        # MSE loss function
+        criterion = nn.MSELoss()
         
-        # Get health report
-        health_report = model.get_health_report()
-        history['neuron_health'].append(health_report['overall_health'])
+        for epoch in range(epochs):
+            epoch_loss = 0
+            
+            for batch_idx, (data, target) in enumerate(dataloader):
+                # Reset model state for each sequence
+                model.reset_state()
+                
+                # Forward pass
+                output, _ = model(data)
+                
+                # Calculate loss
+                loss = criterion(output, target)
+                epoch_loss += loss.item()
+                
+                # Calculate error signal for local update
+                error_signal = target - output
+                
+                # Update model with error signal
+                model.update_from_error(error_signal, learning_rate)
+                
+                # Report progress
+                if (batch_idx + 1) % 10 == 0:
+                    print(f"Epoch {epoch+1}/{epochs}, Batch {batch_idx+1}/{len(dataloader)}, Loss: {loss.item():.6f}")
+            
+            # Calculate epoch average loss
+            avg_loss = epoch_loss / len(dataloader)
+            history['loss'].append(avg_loss)
+            
+            # Get health report
+            health_report = model.get_health_report()
+            history['neuron_health'].append(health_report['overall_health'])
+            
+            # Report epoch results
+            print(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.6f}, Active neurons: {health_report['active_neuron_percentage']}%")
+            print(f"Neuromodulator levels: {health_report['neuromodulator_levels']}")
+            
+            # Analyze pathways at end of epoch
+            if epoch % 2 == 0:
+                pathway_info = model.analyze_pathways()
+                if pathway_info['strongest_pathways']:
+                    print("\nStrongest pathways:")
+                    for path in pathway_info['strongest_pathways'][:3]:
+                        print(f"  Layer {path['layer']}, Neuron {path['neuron_idx']}: Strength {path['connection_strength']:.4f}, Activity {path['activity_level']:.4f}")
         
-        # Report epoch results
-        print(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.6f}, Active neurons: {health_report['active_neuron_percentage']}%")
-        print(f"Neuromodulator levels: {health_report['neuromodulator_levels']}")
-        
-        # Analyze pathways at end of epoch
-        if epoch % 2 == 0:
-            pathway_info = model.analyze_pathways()
-            if pathway_info['strongest_pathways']:
-                print("\nStrongest pathways:")
-                for path in pathway_info['strongest_pathways'][:3]:
-                    print(f"  Layer {path['layer']}, Neuron {path['neuron_idx']}: Strength {path['connection_strength']:.4f}, Activity {path['activity_level']:.4f}")
-    
-    return history
+        return history
+
+
 
 
 # Example usage
@@ -1155,31 +1180,3 @@ def create_dataloader(batch_size=32, num_batches=100):
     
     return SimpleDataLoader(dataset)
 
-
-# Usage example
-if __name__ == "__main__":
-    # Create model
-    input_size = 5
-    hidden_size = 32
-    model = BioGRU(input_size=input_size, hidden_size=hidden_size, num_layers=2, output_size=1)
-    
-    # Create dataloader
-    dataloader = create_dataloader(batch_size=32, num_batches=100)
-    
-    # Train model
-    history = train_biogru(model, dataloader, epochs=5)
-    
-    # Print final health report
-    health_report = model.get_health_report()
-    print("\nFinal health report:")
-    print(f"Overall health: {health_report['overall_health']:.4f}")
-    print(f"Active neurons: {health_report['active_neuron_percentage']}%")
-    print(f"Neuromodulator levels: {health_report['neuromodulator_levels']}")
-    
-    # Analyze pathways
-    pathway_info = model.analyze_pathways()
-    print("\nNetork pathway analysis:")
-    for layer_info in pathway_info['layer_connectivity']:
-        print(f"Layer {layer_info['layer']}: Connection density {layer_info['connection_density']:.4f}, "
-              f"Avg strength {layer_info['avg_connection_strength']:.4f}, "
-              f"Neuron health {layer_info['neuron_health']:.4f}")

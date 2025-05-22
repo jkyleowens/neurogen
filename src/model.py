@@ -118,6 +118,10 @@ class BrainInspiredNN(nn.Module):
 
         self.configure_neurons()
         
+# File: jkyleowens/neurogen/neurogen-c63ed0b31f8d8625aaf45f91c5b7264ef4733ee8/src/model.py
+
+# Inside BrainInspiredNN class:
+
     def forward(self, x, reward=None):
         """
         Forward pass through the network with enhanced anti-overfitting mechanisms.
@@ -129,114 +133,180 @@ class BrainInspiredNN(nn.Module):
         Returns:
             torch.Tensor: Output tensor
         """
-        # Modify forward pass to support feedback-driven learning
-        # Apply controller (biological or persistent) and retain hidden state
+        
+        # --- Forceful sanitization of input 'reward' ---
+        # This is the most critical change to address the expand error directly
+        if reward is not None:
+            if not isinstance(reward, torch.Tensor):
+                # If reward is scalar (e.g. from neuromodulator mode's -loss.detach())
+                # ensure it's a tensor for subsequent ops, but it won't have shape [1,0,1]
+                reward = torch.tensor(reward, device=x.device, dtype=x.dtype)
+            
+            # Check for the problematic zero dimension or zero elements
+            if (hasattr(reward, 'shape') and 0 in reward.shape) or \
+               (hasattr(reward, 'numel') and reward.numel() == 0):
+                print(f"CRITICAL WARNING: BrainInspiredNN.forward received reward with invalid shape {reward.shape if hasattr(reward, 'shape') else 'N/A'} or 0 elements. Neutralizing this reward for current forward pass.")
+                reward = None # Neutralize the problematic reward
+        # --- End of forceful sanitization ---
+
+        # Get controller output (actual logic from your file)
+        # This is a simplified representation; use your actual controller logic
         if self.config.get('model', {}).get('use_bio_gru', False):
-            # BioGRU returns (output_seq, hidden_states)
-            controller_output, new_hidden = self.controller(x, self.hidden)
+            # Assuming self.controller is BioGRU and self.hidden is its state
+            controller_output, new_hidden = self.controller(x, self.hidden, 
+                                                            error_signal_for_update=reward if self.training and reward is not None and self.config.get('training',{}).get('learning_mode') != 'neuromodulator' else None) # Pass reward as error ONLY if appropriate for BioGRU's internal learning
             self.hidden = new_hidden
         else:
-            # PersistentGRUController returns (output_seq, hidden_dict)
+            # Assuming self.controller is PersistentGRUController
             controller_output, hidden_dict = self.controller(x, self.hidden)
             self.hidden = hidden_dict
-
-        # If output is sequence (batch, seq, hidden), take last time step
+        
         if controller_output.dim() == 3:
             final_hidden = controller_output[:, -1, :]
         else:
             final_hidden = controller_output
 
-        # Enhanced neuromodulator-driven feedback adjustment with anti-overfitting mechanisms
-        if reward is not None:
-            # Calculate reward absolute magnitude and sign separately
-            reward_magnitude = torch.abs(reward)
-            reward_sign = torch.sign(reward)
+        # Apply LayerNorm if it exists (added in previous iterations)
+        if hasattr(self, 'controller_output_norm'):
+            final_hidden = self.controller_output_norm(final_hidden)
+        
+        # Original feedback logic, now operating with a sanitized 'reward'
+        processed_reward_for_weight_update = None # Will store the version of reward suitable for self.update_weights
+        if reward is not None: # This 'reward' is now guaranteed not to have a 0-dim or 0-numel
+            # Make reward scalar or [batch_size, 1] for feedback calculations
+            # This logic was part of my previous suggestion, ensuring it's robustly scalar or [B,1]
+            batch_size_from_x = x.size(0)
+            if reward.numel() == 1: # Scalar or [1] or [1,1] etc.
+                reward_for_feedback_calc = reward.reshape([]) # Make scalar
+            elif reward.dim() == 1 and reward.size(0) == batch_size_from_x: # [B]
+                reward_for_feedback_calc = reward.unsqueeze(1) # Make [B,1]
+            elif reward.dim() == 2 and reward.size(0) == batch_size_from_x and reward.size(1) == 1: # [B,1]
+                reward_for_feedback_calc = reward
+            else: # Unhandled shape for per-sample feedback, try to average to scalar
+                print(f"Warning: Reward shape {reward.shape} not directly usable for per-sample feedback. Using mean.")
+                reward_for_feedback_calc = reward.mean() # Scalar
+
+            reward_magnitude = torch.abs(reward_for_feedback_calc)
+            reward_sign = torch.sign(reward_for_feedback_calc)
+            # adjusted_reward will be scalar or [B,1]
+            adjusted_reward = reward_sign * torch.tanh(reward_magnitude * 0.5) 
             
-            # Apply non-linear transformation to prevent excessive feedback on large rewards
-            # This helps prevent the model from overcommitting to spurious large rewards
-            adjusted_reward = reward_sign * torch.tanh(reward_magnitude * 0.5)
-            
-            # Dynamic feedback strength that reduces with continued high rewards (anti-overfitting)
-            # This prevents the model from becoming too specialized/confident
+            consistency_factor = 1.0 
             if hasattr(self, '_prev_rewards'):
-                # Track recent reward history
-                self._prev_rewards.append(adjusted_reward.item())
-                if len(self._prev_rewards) > 10:  # Keep history limited
-                    self._prev_rewards.pop(0)
-                
-                # Calculate average recent reward and variance
-                avg_reward = sum(self._prev_rewards) / len(self._prev_rewards)
-                reward_variance = sum((r - avg_reward)**2 for r in self._prev_rewards) / len(self._prev_rewards)
-                
-                # Reduce feedback strength when rewards are consistently high with low variance
-                # (indicating potential overfitting to a specific pattern)
-                consistency_factor = 1.0
-                if avg_reward > 0.5 and reward_variance < 0.1:
-                    consistency_factor = 0.5  # Reduce feedback to prevent overfitting
-                    print("Warning: Potential overfitting detected - reducing feedback strength")
-                
-                feedback_signal = final_hidden * adjusted_reward * consistency_factor
+                # Assuming _prev_rewards stores scalar rewards
+                # Your existing consistency factor logic
+                if not self._prev_rewards: self._prev_rewards.append(adjusted_reward.mean().item()) # Ensure list not empty
+                self._prev_rewards.append(adjusted_reward.mean().item())
+                if len(self._prev_rewards) > 10: self._prev_rewards.pop(0)
+                avg_reward_hist = sum(self._prev_rewards) / len(self._prev_rewards)
+                reward_variance = sum((r - avg_reward_hist)**2 for r in self._prev_rewards) / len(self._prev_rewards)
+                if avg_reward_hist > 0.5 and reward_variance < 0.1: # Example thresholds
+                    consistency_factor = 0.5
             else:
-                # First reward, initialize history
-                self._prev_rewards = [adjusted_reward.item()]
-                feedback_signal = final_hidden * adjusted_reward
-            
-            # Apply feedback signal
+                self._prev_rewards = [adjusted_reward.mean().item()]
+
+            # This multiplication should now be safe
+            feedback_signal = final_hidden * adjusted_reward * consistency_factor
             final_hidden = final_hidden + feedback_signal
+            
+            processed_reward_for_weight_update = reward_for_feedback_calc # Use this for update_weights
 
-        # Apply feature-wise dropout for better regularization (instead of just dropout layer)
-        if self.training:
+        # ... (dropout, neuron health, masking as before)
+        if self.training and hasattr(self, 'dropout') and self.dropout > 0:
             dropout_mask = torch.ones_like(final_hidden)
-            feature_dropout_rate = self.dropout * 1.2  # Slightly stronger feature dropout
-            dropout_mask = dropout_mask.bernoulli_(1 - feature_dropout_rate) / (1 - feature_dropout_rate)
-            final_hidden = final_hidden * dropout_mask
+            feature_dropout_rate = float(self.dropout * 1.2)
+            if feature_dropout_rate > 0 and feature_dropout_rate < 1.0 : # ensure rate is valid
+                 dropout_mask = dropout_mask.bernoulli_(1 - feature_dropout_rate) / (1 - feature_dropout_rate)
+                 final_hidden = final_hidden * dropout_mask
+            elif feature_dropout_rate >=1.0: # Avoid division by zero or negative
+                 final_hidden = final_hidden * 0 # All dropout if rate >=1
 
-        # Update neuron health based on feedback magnitude with improved balance
-        if reward is not None:
+        if processed_reward_for_weight_update is not None and hasattr(self, 'neuron_health') and hasattr(self, 'health_decay') and hasattr(self, 'death_threshold'):
             with torch.no_grad():
-                # Calculate effect but with diminishing returns for very large feedback
-                effect = torch.tanh(torch.mean(torch.abs(feedback_signal), dim=0))
-                
-                # Introduce homeostasis - neurons that are consistently active get less health boost
-                if hasattr(self, '_neuron_activity'):
-                    # Update activity tracking (exponential moving average)
-                    self._neuron_activity = 0.9 * self._neuron_activity + 0.1 * (final_hidden > 0.5).float()
+                if 'feedback_signal' in locals():
+                    effect = torch.tanh(torch.mean(torch.abs(feedback_signal), dim=0))
+                    if hasattr(self, '_neuron_activity'):
+                        self._neuron_activity = 0.9 * self._neuron_activity.to(effect.device) + 0.1 * (final_hidden.mean(0) > 0.5).float() # Ensure _neuron_activity matches hidden_size
+                        activity_modifier = 1.0 - torch.abs(self._neuron_activity - 0.5) * 0.5
+                        effect = effect * activity_modifier.to(effect.device)
+                    else:
+                        self._neuron_activity = 0.1 * (final_hidden.mean(0) > 0.5).float()
                     
-                    # Neurons with balanced activity (not too high or low) get health boost
-                    # This encourages diversity in neural population
-                    activity_modifier = 1.0 - torch.abs(self._neuron_activity - 0.5) * 0.5
-                    effect = effect * activity_modifier
-                else:
-                    # First update, initialize tracking
-                    self._neuron_activity = 0.1 * (final_hidden > 0.5).float()
-                
-                # Update health with more balanced decay
-                self.neuron_health = self.neuron_health * self.health_decay + effect * (1 - self.health_decay)
-                
-                # Update mask: neurons below threshold die
-                self.neuron_mask = (self.neuron_health > self.death_threshold).float()
+                    self.neuron_health = self.neuron_health.to(effect.device) * self.health_decay + effect * (1 - self.health_decay)
+                    self.neuron_mask = (self.neuron_health > self.death_threshold).float()
 
-        # Apply neuron mask to prune dead neurons
-        final_hidden = final_hidden * self.neuron_mask
+        if hasattr(self, 'neuron_mask'):
+            final_hidden = final_hidden * self.neuron_mask.to(final_hidden.device)
 
-        # Store features for potential weight updates
         self._last_features = final_hidden.detach()
 
-        # Apply spectral normalization to output layer weights to control Lipschitz constant
-        # This helps prevent erratic behavior and improve generalization
-        if not hasattr(self, '_applied_spectral_norm'):
-            # Apply spectral normalization only once
-            self.output_layer = torch.nn.utils.spectral_norm(self.output_layer)
-            self._applied_spectral_norm = True
-        
-        # Apply dropout then project to output
-        out_hidden = self.dropout_layer(final_hidden)
+        out_hidden = self.dropout_layer(final_hidden) if hasattr(self, 'dropout_layer') else final_hidden
         output = self.output_layer(out_hidden)
 
-        # Optionally update weights if reward provided with enhanced regularization
-        if reward is not None:
-            self.update_weights(reward)
+        if processed_reward_for_weight_update is not None: # Use the sanitized/processed reward
+            self.update_weights(processed_reward_for_weight_update)
         return output
+
+    def update_weights(self, reward_signal): # reward_signal is expected to be scalar or [B,1]
+        # (Ensure the update_weights method from my previous detailed response is used here,
+        #  which robustly handles scalar or [B,1] reward_signal and checks for numel == 0)
+        with torch.no_grad():
+            current_reward_value_for_logic = 0.0
+            if isinstance(reward_signal, torch.Tensor):
+                if reward_signal.numel() == 0:
+                    print(f"Warning: update_weights received reward_signal with 0 elements: {reward_signal.shape}. Skipping weight update.")
+                    return
+                current_reward_value_for_logic = reward_signal.mean().item() # For history and bias update
+            elif isinstance(reward_signal, (int, float)):
+                current_reward_value_for_logic = reward_signal
+            else:
+                print(f"Warning: update_weights received reward_signal of unexpected type: {type(reward_signal)}. Skipping update.")
+                return
+
+            effective_lr = self.learning_rate 
+            if not hasattr(self, '_reward_history'): self._reward_history = [] # Ensure it's a list
+            
+            # Update reward history with the scalar value
+            self._reward_history.append(abs(current_reward_value_for_logic))
+            if len(self._reward_history) > 20: self._reward_history.pop(0)
+            
+            if self._reward_history : # Check if not empty
+                avg_reward_hist = sum(self._reward_history) / len(self._reward_history)
+                max_reward_hist = max(self._reward_history)
+                lr_scale = 1.0
+                if avg_reward_hist > 0.5 * max_reward_hist and avg_reward_hist > 0.2: # Check avg_reward_hist too
+                    lr_scale = 0.5
+                effective_lr = self.learning_rate * lr_scale
+            
+            if not hasattr(self, '_last_features') or self._last_features is None:
+                print("Warning: _last_features not available in update_weights. Skipping update.")
+                return
+
+            last_features_device = self._last_features.to(self.output_layer.weight.device)
+            normalized_features = last_features_device / (last_features_device.norm(dim=1, keepdim=True) + 1e-8)
+            
+            # Prepare reward_signal for broadcasting with normalized_features ([B,H])
+            if isinstance(reward_signal, torch.Tensor):
+                if reward_signal.dim() == 0 or reward_signal.numel() == 1: # Scalar tensor
+                    reward_for_delta = reward_signal.reshape(1,1) # Make it [1,1] to broadcast like a scalar
+                elif reward_signal.dim() == 1 and reward_signal.size(0) == normalized_features.size(0): # [B]
+                    reward_for_delta = reward_signal.unsqueeze(1) # Make [B,1]
+                elif reward_signal.dim() == 2 and reward_signal.size(0) == normalized_features.size(0) and reward_signal.size(1) == 1: # [B,1]
+                    reward_for_delta = reward_signal
+                else: # Fallback to scalar mean if shape is unexpected for broadcasting
+                    print(f"Warning: update_weights reward_signal shape {reward_signal.shape} not ideal for delta. Using mean.")
+                    reward_for_delta = reward_signal.mean().reshape(1,1)
+            else: # Python float/int
+                 reward_for_delta = torch.tensor([[reward_signal]], device=normalized_features.device, dtype=normalized_features.dtype)
+
+
+            delta = (normalized_features * reward_for_delta).mean(dim=0) 
+            
+            weight_decay_rate = self.config.get('training', {}).get('weight_decay_local', 0.0001)
+            weight_decay = weight_decay_rate * self.output_layer.weight.data
+            
+            self.output_layer.weight.data += effective_lr * delta.unsqueeze(0) - weight_decay
+            self.output_layer.bias.data += effective_lr * current_reward_value_for_logic * 0.1 # Bias update uses scalar reward
 
     
     def configure_neurons(self, config=None):
