@@ -774,60 +774,78 @@ class BioGRU(nn.Module):
         original_dim = x.dim()
         current_device = x.device
 
-        if original_dim == 2:
-            x = x.unsqueeze(1) 
+        if original_dim == 2:  # if x is [batch, features]
+            x = x.unsqueeze(1)  # Convert to [batch, 1, features] for sequence processing
 
         batch_size, seq_len, _ = x.size()
 
+        # Initialize hidden states
         if hidden_states_init is None:
-            if self.hidden_states is None or self.hidden_states[0].size(0) != batch_size:
+            # If no initial hidden state is provided, use the stored one or initialize to zeros
+            # Ensure self.hidden_states is a list of tensors, one for each layer
+            if not hasattr(self, 'hidden_states') or self.hidden_states is None or \
+               not isinstance(self.hidden_states, list) or \
+               len(self.hidden_states) != self.num_layers or \
+               self.hidden_states[0].size(0) != batch_size or \
+               self.hidden_states[0].size(1) != self.hidden_size:
                 self.hidden_states = [torch.zeros(batch_size, self.hidden_size, device=current_device) for _ in range(self.num_layers)]
-            current_h_states = self.hidden_states
+            current_h_states = self.hidden_states  # Use the persistent state
         else:
+            # Use provided initial hidden states
             current_h_states = [h.to(current_device) for h in hidden_states_init]
+            if len(current_h_states) != self.num_layers or \
+               current_h_states[0].size(0) != batch_size or \
+               current_h_states[0].size(1) != self.hidden_size:
+                # Fallback if provided hidden_states_init is not matching expected structure
+                self.hidden_states = [torch.zeros(batch_size, self.hidden_size, device=current_device) for _ in range(self.num_layers)]
+                current_h_states = self.hidden_states
+
 
         output_sequence = []
 
-        for t in range(seq_len):
-            x_t = x[:, t, :]
+        for t in range(seq_len):  # Iterate over sequence
+            x_t = x[:, t, :]  # Current input in sequence
             layer_input = x_t
-            new_h_for_step = []
+            new_h_for_step = []  # To store hidden states of all layers for this time step
 
-            for i, layer in enumerate(self.layers):
-                h_layer_prev = current_h_states[i]
-                # Pass the error_signal to the BiologicalGRUCell layer
-                h_layer_new = layer(layer_input, h_layer_prev, 
-                                    error_signal=error_signal_for_update if self.training else None, 
+            for i, layer in enumerate(self.layers):  # Iterate over layers of BioGRU
+                h_layer_prev = current_h_states[i]  # Previous hidden state for this layer
+                
+                actual_error_signal_for_cell = None
+                if self.training and error_signal_for_update is not None:
+                    actual_error_signal_for_cell = error_signal_for_update
+
+                h_layer_new = layer(layer_input, h_layer_prev,
+                                    error_signal=actual_error_signal_for_cell,
                                     neuromodulators=self.neuromodulator_levels)
                 new_h_for_step.append(h_layer_new)
-                layer_input = h_layer_new
+                layer_input = h_layer_new  # Output of current layer is input to next
 
-            current_h_states = new_h_for_step
+            current_h_states = new_h_for_step  # Update current_h_states with the new states from this time step
+            
+            # Pathway activity update logic
+            if self.training:
+                # Ensure pathway_activity is initialized and on the correct device
+                if not hasattr(self, 'pathway_activity') or self.pathway_activity is None or \
+                   self.pathway_activity.device != current_device or \
+                   self.pathway_activity.shape[0] != self.num_layers or \
+                   self.pathway_activity.shape[1] != self.hidden_size:
+                    self.pathway_activity = torch.zeros(self.num_layers, self.hidden_size, device=current_device)
+                
+                for i_layer in range(self.num_layers):
+                    # current_h_states[i_layer] is [B, H], mean over batch to get [H]
+                    activity_mean = current_h_states[i_layer].detach().abs().mean(0)
+                    self.pathway_activity[i_layer] = 0.9 * self.pathway_activity[i_layer] + 0.1 * activity_mean
 
-            if self.training: # Pathway activity update logic
-                for i in range(self.num_layers):
-                    if hasattr(self.pathway_activity, 'device') and self.pathway_activity.device == current_device:
-                         self.pathway_activity[i] = 0.9 * self.pathway_activity[i] + \
-                                                   0.1 * current_h_states[i].detach().abs().mean(0)
-                    else: # Initialize or move if device mismatch or first time
-                         self.pathway_activity = self.pathway_activity.to(current_device)
-                         self.pathway_activity[i] = 0.9 * self.pathway_activity[i] + \
-                                                   0.1 * current_h_states[i].detach().abs().mean(0)
+            last_layer_h_t = current_h_states[-1] # Output for this time step is the hidden state of the last layer
+            output_sequence.append(last_layer_h_t)
 
+        self.hidden_states = current_h_states # Store the final hidden states of all layers
 
-            last_layer_h = current_h_states[-1]
-            if isinstance(self.output_neurons, BioNeuron):
-                 step_output = self.output_neurons(last_layer_h)
-            else:
-                 step_output = self.output_neurons(last_layer_h)
-            output_sequence.append(step_output)
+        outputs = torch.stack(output_sequence, dim=1)  # Stack outputs for each time step: [B, S, H]
 
-        self.hidden_states = current_h_states
-
-        outputs = torch.stack(output_sequence, dim=1)
-
-        if original_dim == 2:
-            outputs = outputs.squeeze(1)
+        if original_dim == 2:  # If original input was 2D [B, F], output should be 2D [B, H]
+            outputs = outputs.squeeze(1) # This effectively takes the output of the single time step
 
         return outputs, self.hidden_states
 

@@ -509,7 +509,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, config, d
     # After training, restore best model
     best_checkpoint_path = os.path.join(checkpoint_dir, 'best_model.pt')
     if os.path.exists(best_checkpoint_path):
-        checkpoint = torch.load(best_checkpoint_path, map_location=device)
+        checkpoint = torch.load(best_checkpoint_path, map_location=device, weights_only=False) # Added weights_only=False
         model.load_state_dict(checkpoint['model_state_dict'])
         print(f"Restored best model from epoch {checkpoint['epoch']+1}")
     
