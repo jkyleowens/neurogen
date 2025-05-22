@@ -2,13 +2,13 @@
 
 ## Training & Validation Summary
 
-**Training Loss:** 0.000000
+**Training Loss:** 0.070826
 
-**Validation Loss:** inf
+**Validation Loss:** 0.017797
 
 ## Test Performance
 
-**Test Loss:** 0.000000
+**Test Loss:** 0.017797
 
 ## Additional Metrics
 

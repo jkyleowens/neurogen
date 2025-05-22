@@ -105,7 +105,7 @@ general:
 # Model parameters
 model:
   input_size: 5  # Will be automatically adjusted based on data features
-  hidden_size: 128
+  hidden_size: 256
   output_size: 1  # Predicting a single value (next price)
   use_bio_gru: true  # Use the biologically-inspired GRU
   
@@ -113,7 +113,7 @@ model:
 controller:
   type: "persistent_gru"
   num_layers: 2
-  persistent_memory_size: 64
+  persistent_memory_size: 128
   dropout: 0.2
   
 # Neuromodulator parameters

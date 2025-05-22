@@ -1,0 +1,13 @@
+Brain-Inspired Neural Network - Pipeline Summary
+==================================================
+Execution Date: 2025-05-22 17:53:32
+Configuration: config/financial_config.yaml
+Model Path: neurogen/models/checkpoints/best_model.pt
+Output Directory: results
+
+Pipeline Phases:
+  Pretraining: ❌
+  Training: ❌
+  Validation: ❌
+  Testing: ✅
+
