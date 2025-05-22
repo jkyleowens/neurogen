@@ -2,8 +2,8 @@
 
 # General parameters
 general:
-  device: "cpu"  # Default to CPU for testing
-  results_dir: "/home/ubuntu/results"
+  device: "gpu"  # Default to CPU for testing
+  results_dir: "~/Desktop/neural_net_practice/neurogen/results"
   
 # Model parameters
 model:

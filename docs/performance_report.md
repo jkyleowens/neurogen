@@ -2,21 +2,20 @@
 
 ## Training & Validation Summary
 
-**Training Loss:** 0.560879
+**Training Loss:** 0.886975
 
-**Validation Loss:** 1.277422
+**Validation Loss:** 0.782188
 
 ## Test Performance
 
-**Test Loss:** 0.993698
-
-**Test Accuracy:** 7.50%
+**Test Loss:** 3.299495
 
 ## Additional Metrics
 
-- **LOSS:** 0.993698
-- **MSE:** 0.992468
-- **RMSE:** 0.996227
-- **MAE:** 0.798115
-- **R2:** -0.010715
-- **DIRECTIONAL_ACCURACY:** 50.377517%
+- **TEST_LOSS:** 3.299495
+- **TEST_MSE:** 3.245832
+- **TEST_MAE:** 1.780256
+- **TEST_RMSE:** 1.801619
+- **TEST_R2:** -41.418743
+- **TEST_DIRECTION_ACCURACY:** 0.000000%
+- **TEST_ACCURACY:** 0.000000%
