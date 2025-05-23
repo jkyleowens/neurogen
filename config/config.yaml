@@ -1,47 +1,495 @@
-# Brain-Inspired Neural Network Configuration
+# Brain-Inspired Neural Network - Comprehensive Configuration
+# This unified configuration file contains all settings for training, validation,
+# and realistic trading simulation evaluation.
 
-# General parameters
+# =============================================================================
+# GENERAL SETTINGS
+# =============================================================================
 general:
-  device: "gpu"  # Default to CPU for testing
-  results_dir: "~/Desktop/neural_net_practice/neurogen/results"
-  
-# Model parameters
+  device: "cuda"  # cuda, cpu, or auto
+  results_dir: "results"
+  random_seed: 42
+  debug_mode: false
+  verbose_logging: true
+
+# =============================================================================
+# MODEL ARCHITECTURE
+# =============================================================================
 model:
-  input_size: 64  # Match the checkpoint model
-  hidden_size: 128
-  output_size: 32  # Match the checkpoint model
+  # Core model parameters
+  input_size: 23          # Number of technical indicators and price features
+  hidden_size: 128        # Hidden layer size
+  output_size: 1          # Single output for trading signal
+  use_bio_gru: true       # Use biologically-inspired GRU
   
-# Controller parameters
+  # Advanced model settings
+  dropout_rate: 0.2
+  activation_function: "adaptive"  # adaptive, relu, tanh
+  layer_normalization: true
+  gradient_clipping: 1.0
+
+# =============================================================================
+# CONTROLLER CONFIGURATION
+# =============================================================================
 controller:
   type: "persistent_gru"
   num_layers: 2
   persistent_memory_size: 64
   dropout: 0.2
+  persistence_factor: 0.9
   
-# Neuromodulator parameters
+  # Advanced controller features
+  memory_consolidation: true
+  consolidation_frequency: 10  # epochs
+  adaptive_memory: true
+
+# =============================================================================
+# NEUROMODULATOR SYSTEM
+# =============================================================================
 neuromodulator:
-  dopamine_scale: 1.0
-  serotonin_scale: 1.0
-  norepinephrine_scale: 1.0
-  acetylcholine_scale: 1.0
-  reward_decay: 0.95
+  # Neurotransmitter scales
+  dopamine_scale: 1.0      # Reward signaling
+  serotonin_scale: 0.8     # Mood/stability regulation
+  norepinephrine_scale: 0.7 # Attention/arousal
+  acetylcholine_scale: 0.9  # Learning/memory formation
   
-# Training parameters
+  # Decay and adaptation
+  reward_decay: 0.95
+  adaptation_rate: 0.01
+  stability_factor: 0.1
+  
+  # Anti-overfitting mechanisms
+  regularization_strength: 0.1
+  consistency_threshold: 0.5
+
+# =============================================================================
+# NEURON OPTIMIZATION
+# =============================================================================
+neuron_optimization:
+  enabled: true
+  target_activity: 0.15
+  homeostatic_rate: 0.01
+  health_decay: 0.99
+  death_threshold: 0.1
+  
+  # Plasticity settings
+  plasticity:
+    hebbian_weight: 0.3
+    error_weight: 0.7
+    regularization: 0.0001
+    metaplasticity: true
+  
+  # Synaptic dynamics
+  synapse:
+    facilitation_rate: 0.1
+    depression_rate: 0.2
+    normalization: "l2"
+    adaptive_thresholds: true
+
+# =============================================================================
+# TRAINING CONFIGURATION
+# =============================================================================
 training:
+  # Basic training parameters
   batch_size: 32
   learning_rate: 0.001
   num_epochs: 100
+  weight_decay: 0.0001
+  
+  # Learning strategy
+  learning_mode: "neuromodulator"  # neuromodulator, backprop, hybrid
   optimizer: "adam"
   
-# Data parameters
+  # Training dynamics
+  early_stopping_patience: 20
+  learning_rate_decay: 0.1
+  decay_patience: 10
+  gradient_clip: 1.0
+  
+  # Performance thresholds
+  accuracy_threshold: 0.02
+  loss_improvement_threshold: 0.001
+  
+  # Advanced training features
+  curriculum_learning: false
+  progressive_difficulty: false
+  adaptive_batch_size: false
+
+# =============================================================================
+# DATA CONFIGURATION
+# =============================================================================
 data:
+  # Dataset settings
   dataset: "financial"
   ticker_symbol: "AAPL"
-  test_ticker: "AAPL"
   features: ["Open", "High", "Low", "Close", "Volume"]
+  
+  # Date ranges
+  start_date: "2020-01-01"
+  end_date: "2023-12-31"
+  
+  # Data splitting
   train_ratio: 0.7
   val_ratio: 0.15
   test_ratio: 0.15
-  sequence_length: 50
+  
+  # Sequence settings
+  sequence_length: 30
   prediction_horizon: 1
+  target_column: "Close"
+  
+  # Preprocessing
   normalize: true
+  normalization_method: "standard"  # standard, minmax, robust
+  handle_missing: "forward_fill"
+  outlier_treatment: "clip"  # clip, remove, none
+  
+  # Data augmentation
+  augment_prob: 0.3
+  augment_strength: 0.02
+  augmentation_methods: ["noise", "scale", "time_warp"]
+  
+  # Sampling
+  train_samples: 2000
+  val_samples: 400
+  num_workers: 2
+  pin_memory: true
+
+# =============================================================================
+# TECHNICAL INDICATORS
+# =============================================================================
+technical_indicators:
+  enabled: true
+  
+  # Indicator periods
+  periods:
+    sma_short: 10
+    sma_long: 30
+    ema_short: 12
+    ema_long: 26
+    rsi: 14
+    bollinger_bands: 20
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    atr: 14
+    volume_ma: 20
+    stochastic: 14
+    williams_r: 14
+    cci: 20
+    momentum: 10
+  
+  # Feature engineering
+  include_price_ratios: true
+  include_volume_indicators: true
+  include_volatility_measures: true
+  include_trend_indicators: true
+  include_momentum_indicators: true
+  
+  # Normalization
+  normalize_indicators: true
+  clip_outliers: true
+  outlier_percentiles: [1, 99]
+
+# =============================================================================
+# PRETRAINING CONFIGURATION
+# =============================================================================
+pretraining:
+  enabled: true
+  epochs: 5
+  
+  # Component-specific pretraining
+  controller:
+    enabled: true
+    learning_rate: 0.001
+    epochs: 3
+    self_supervised: true
+  
+  neuromodulator:
+    enabled: true
+    learning_rate: 0.0005
+    epochs: 2
+    reward_simulation: true
+  
+  # Pretraining strategies
+  contrastive_learning: true
+  temporal_coherence: true
+  representation_diversity: true
+
+# =============================================================================
+# TRADING SIMULATION CONFIGURATION
+# =============================================================================
+trading:
+  # Capital and costs
+  initial_capital: 100000
+  transaction_cost: 0.001      # 0.1% per trade
+  slippage: 0.0005            # 0.05% market impact
+  
+  # Position management
+  max_position_size: 0.3      # Maximum 30% of capital per position
+  min_trade_amount: 100       # Minimum trade size
+  confidence_threshold: 0.6   # Minimum confidence for trade execution
+  
+  # Risk management
+  stop_loss_pct: -0.05       # 5% stop loss
+  take_profit_pct: 0.10      # 10% take profit
+  max_daily_trades: 5        # Maximum trades per day
+  max_drawdown_stop: -0.20   # Stop trading at 20% drawdown
+  
+  # Trading strategy parameters
+  buy_threshold: 0.6         # Model output > 0.6 = buy signal
+  sell_threshold: 0.4        # Model output < 0.4 = sell signal
+  signal_smoothing: 3        # Days to smooth trading signals
+  
+  # Portfolio rebalancing
+  rebalancing_enabled: false
+  rebalancing_frequency: "monthly"
+  target_allocation: 0.7     # Target stock allocation
+
+# =============================================================================
+# TEST SCENARIOS - Comprehensive Market Conditions
+# =============================================================================
+test_scenarios:
+  # Bull Market Scenarios
+  - name: "AAPL_COVID_Recovery_Bull"
+    ticker: "AAPL"
+    start_date: "2020-03-01"
+    end_date: "2021-12-31"
+    description: "Apple during COVID recovery bull market"
+    market_regime: "bull"
+    expected_volatility: "moderate"
+    
+  - name: "MSFT_AI_Boom"
+    ticker: "MSFT"
+    start_date: "2023-01-01"
+    end_date: "2023-12-31"
+    description: "Microsoft during AI boom period"
+    market_regime: "bull"
+    expected_volatility: "high"
+  
+  # Bear Market Scenarios
+  - name: "AAPL_2022_Bear_Market"
+    ticker: "AAPL"
+    start_date: "2022-01-01"
+    end_date: "2022-12-31"
+    description: "Apple during 2022 bear market"
+    market_regime: "bear"
+    expected_volatility: "high"
+    
+  - name: "META_Metaverse_Decline"
+    ticker: "META"
+    start_date: "2021-09-01"
+    end_date: "2022-12-31"
+    description: "Meta during metaverse pivot decline"
+    market_regime: "bear"
+    expected_volatility: "very_high"
+  
+  # Sideways/Choppy Markets
+  - name: "SPY_Sideways_2015"
+    ticker: "SPY"
+    start_date: "2015-01-01"
+    end_date: "2016-12-31"
+    description: "S&P 500 during sideways market"
+    market_regime: "sideways"
+    expected_volatility: "moderate"
+    
+  # High Volatility Scenarios
+  - name: "TSLA_Extreme_Volatility"
+    ticker: "TSLA"
+    start_date: "2020-01-01"
+    end_date: "2023-12-31"
+    description: "Tesla extreme volatility period"
+    market_regime: "volatile"
+    expected_volatility: "extreme"
+    
+  # Crisis/Recovery Scenarios
+  - name: "SPY_COVID_Crash_Recovery"
+    ticker: "SPY"
+    start_date: "2020-02-01"
+    end_date: "2020-12-31"
+    description: "S&P 500 COVID crash and recovery"
+    market_regime: "crisis_recovery"
+    expected_volatility: "extreme"
+
+# =============================================================================
+# PERFORMANCE EVALUATION CRITERIA
+# =============================================================================
+evaluation:
+  # Return benchmarks
+  minimum_acceptable_return: 5.0     # 5% annual return
+  good_return_threshold: 12.0        # 12% annual return
+  excellent_return_threshold: 20.0   # 20% annual return
+  
+  # Risk benchmarks
+  maximum_acceptable_drawdown: 15.0  # 15% max drawdown
+  minimum_sharpe_ratio: 1.0         # Sharpe ratio >= 1.0
+  minimum_win_rate: 45.0            # 45% win rate
+  
+  # Market outperformance
+  required_market_outperformance: 0.6  # Beat market 60% of time
+  minimum_alpha: 2.0                   # Generate 2% alpha annually
+  
+  # Trading efficiency
+  maximum_fee_impact: 1.5           # Fees <= 1.5% of capital
+  optimal_trade_frequency: 50       # Target 50 trades/year
+  
+  # Grade thresholds
+  grade_thresholds:
+    A_plus: { return: 20, sharpe: 2.0, outperformance: 0.8 }
+    A: { return: 15, sharpe: 1.5, outperformance: 0.7 }
+    B: { return: 10, sharpe: 1.0, outperformance: 0.6 }
+    C: { return: 5, sharpe: 0.5, outperformance: 0.4 }
+
+# =============================================================================
+# REPORTING AND VISUALIZATION
+# =============================================================================
+reporting:
+  # Report generation
+  generate_detailed_charts: true
+  save_daily_decisions: true
+  save_trade_log: true
+  create_performance_dashboard: true
+  generate_pdf_report: true
+  
+  # Chart types
+  charts:
+    - portfolio_value_over_time
+    - daily_returns_distribution
+    - drawdown_chart
+    - trading_actions_timeline
+    - position_size_over_time
+    - cumulative_returns_comparison
+    - monthly_returns_heatmap
+    - risk_return_scatter
+    - technical_indicators_overlay
+    - neuron_health_visualization
+    - neuromodulator_activity
+  
+  # Export formats
+  export_formats: ["png", "pdf", "csv", "json"]
+  
+  # Dashboard settings
+  dashboard:
+    interactive: true
+    real_time_updates: false
+    mobile_responsive: true
+    theme: "dark"  # dark, light, auto
+
+# =============================================================================
+# ADVANCED FEATURES
+# =============================================================================
+advanced:
+  # Multi-asset trading
+  multi_asset_enabled: false
+  asset_correlation_threshold: 0.7
+  portfolio_optimization: false
+  
+  # Market regime detection
+  regime_detection:
+    enabled: true
+    lookback_period: 60
+    volatility_threshold: 0.02
+    trend_threshold: 0.001
+    
+  # Ensemble methods
+  ensemble:
+    enabled: false
+    n_models: 3
+    voting_method: "weighted"  # weighted, majority, average
+    
+  # Real-time features
+  real_time:
+    enabled: false
+    data_feed: "yahoo"  # yahoo, alpha_vantage, quandl
+    update_frequency: "1h"
+    
+  # Backtesting enhancements
+  backtesting:
+    walk_forward_analysis: false
+    monte_carlo_simulations: false
+    stress_testing: false
+    sensitivity_analysis: false
+
+# =============================================================================
+# DEBUGGING AND MONITORING
+# =============================================================================
+debug:
+  # Logging
+  verbose_logging: true
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  save_model_predictions: true
+  save_technical_indicators: true
+  log_trading_decisions: true
+  
+  # Performance monitoring
+  monitor_memory_usage: true
+  profile_execution_time: true
+  track_gradient_norms: true
+  monitor_neuron_health: true
+  
+  # Validation and testing
+  validate_data_quality: true
+  check_indicator_calculations: true
+  verify_trading_logic: true
+  run_unit_tests: false
+  
+  # Emergency stops
+  nan_detection: true
+  infinite_loss_protection: true
+  memory_overflow_protection: true
+
+# =============================================================================
+# EXPERIMENTAL FEATURES (Use with caution)
+# =============================================================================
+experimental:
+  # Advanced learning
+  meta_learning: false
+  few_shot_adaptation: false
+  continual_learning: false
+  
+  # Novel architectures
+  attention_mechanisms: false
+  transformer_integration: false
+  graph_neural_networks: false
+  
+  # Advanced trading
+  options_trading: false
+  short_selling: false
+  leverage_trading: false
+  
+  # AI enhancements
+  llm_integration: false
+  reinforcement_learning: false
+  evolutionary_strategies: false
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+environments:
+  development:
+    training:
+      num_epochs: 5
+      early_stopping_patience: 3
+    trading:
+      initial_capital: 10000
+    test_scenarios:
+      - name: "Quick_Test"
+        ticker: "AAPL"
+        start_date: "2023-10-01"
+        end_date: "2023-12-31"
+        description: "Quick development test"
+  
+  testing:
+    debug:
+      verbose_logging: true
+      run_unit_tests: true
+    trading:
+      initial_capital: 50000
+  
+  production:
+    debug:
+      verbose_logging: false
+      log_level: "WARNING"
+    advanced:
+      real_time:
+        enabled: true
