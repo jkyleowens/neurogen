@@ -10,6 +10,7 @@ This module provides patches to fix:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import cupy as cp
 
 
 def add_init_hidden_to_controller(controller_class):
@@ -413,8 +414,8 @@ def fix_test_function(test_function):
                 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
                 
                 # Stack arrays
-                predictions = np.vstack(all_predictions)
-                targets = np.vstack(all_targets)
+                predictions = cp.vstack(all_predictions)
+                targets = cp.vstack(all_targets)
                 
                 # Ensure shapes match
                 if predictions.shape != targets.shape:
@@ -424,7 +425,7 @@ def fix_test_function(test_function):
                 
                 # Calculate metrics
                 mse = mean_squared_error(targets, predictions)
-                rmse = np.sqrt(mse)
+                rmse = cp.sqrt(mse)
                 mae = mean_absolute_error(targets, predictions)
                 
                 # Safe R² calculation
@@ -434,9 +435,9 @@ def fix_test_function(test_function):
                     r2 = float('nan')
                 
                 # Direction accuracy
-                direction_pred = np.diff(predictions.flatten())
-                direction_true = np.diff(targets.flatten())
-                direction_accuracy = np.mean((direction_pred > 0) == (direction_true > 0))
+                direction_pred = cp.diff(predictions.flatten())
+                direction_true = cp.diff(targets.flatten())
+                direction_accuracy = cp.mean((direction_pred > 0) == (direction_true > 0))
                 
                 # Return metrics
                 test_metrics = {

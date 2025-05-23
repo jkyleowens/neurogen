@@ -1,5 +1,5 @@
 import torch
-import numpy as np
+import cupy as cp
 import matplotlib.pyplot as plt
 import os
 
@@ -43,9 +43,9 @@ def analyze_neuron_health(model):
                 for neuron in [layer.update_gate_neurons[i], layer.reset_gate_neurons[i], layer.candidate_neurons[i]]:
                     weight_norms.append(torch.norm(neuron.weights).item())
         
-        health_stats['layer_health'].append(np.mean(layer_health) if layer_health else 0)
+        health_stats['layer_health'].append(cp.mean(layer_health) if layer_health else 0)
         health_stats['active_ratios'].append(active_neurons / max(1, layer.hidden_size))
-        health_stats['weight_norms'].append(np.mean(weight_norms) if weight_norms else 0)
+        health_stats['weight_norms'].append(cp.mean(weight_norms) if weight_norms else 0)
     
     return health_stats
 

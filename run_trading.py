@@ -29,7 +29,7 @@ try:
     from trading_simulation import TradingSimulator, TechnicalIndicators
     import yfinance as yf
     import pandas as pd
-    import numpy as np
+    import cupy as cp
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Please ensure all required packages are installed:")
@@ -182,7 +182,7 @@ def run_simple_trading_demo(model_path=None, quick_test=True):
         print(f"📊 DEMO SUMMARY")
         print(f"{'='*60}")
         
-        total_return_avg = np.mean([r['total_return_pct'] for r in all_results.values()])
+        total_return_avg = cp.mean([r['total_return_pct'] for r in all_results.values()])
         outperformed_count = sum([r['outperformed_market'] for r in all_results.values()])
         total_tests = len(all_results)
         

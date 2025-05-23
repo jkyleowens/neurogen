@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 import yfinance as yf
-import numpy as np
+import cupy as cp
 import pandas as pd
 import random
 
@@ -27,7 +27,7 @@ class YFinanceDataset(Dataset):
             # Create synthetic data as fallback
             dates = pd.date_range(start=self.start_date, end=self.end_date, freq='D')
             synthetic_data = pd.Series(
-                100 + np.cumsum(np.random.randn(len(dates)) * 0.01),
+                100 + cp.cumsum(cp.random.randn(len(dates)) * 0.01),
                 index=dates,
                 name='Close'
             )
@@ -66,7 +66,7 @@ class RandomWindowDataset(Dataset):
 
         # Apply data augmentation if enabled
         if self.augment:
-            noise = np.random.normal(0, self.noise_std, seq.shape)
+            noise = cp.random.normal(0, self.noise_std, seq.shape)
             seq = seq + noise
 
         return torch.tensor(seq, dtype=torch.float32), torch.tensor(tgt, dtype=torch.float32)
@@ -150,12 +150,12 @@ def create_datasets(config):
             n_features = len(features) if isinstance(features, list) else 5
             
             # Generate synthetic time series
-            data = np.zeros((n_days, n_features))
-            data[0] = np.random.randn(n_features) + 100  # Starting prices around 100
+            data = cp.zeros((n_days, n_features))
+            data[0] = cp.random.randn(n_features) + 100  # Starting prices around 100
             
             for i in range(1, n_days):
                 # Random walk with slight trend
-                data[i] = data[i-1] + np.random.randn(n_features) * 0.02
+                data[i] = data[i-1] + cp.random.randn(n_features) * 0.02
             
             available_features = features if isinstance(features, list) else ['Close']
             print(f"Created synthetic data with shape: {data.shape}")
@@ -180,7 +180,7 @@ def create_datasets(config):
             means = train_data.mean(axis=0)
             stds = train_data.std(axis=0)
             # Handle zeros in standard deviation
-            stds = np.where(stds == 0, 1, stds)
+            stds = cp.where(stds == 0, 1, stds)
             
             train_data = (train_data - means) / stds
             val_data = (val_data - means) / stds
@@ -219,8 +219,8 @@ def create_datasets(config):
                     test_seqs.append(test_data[i:i+sequence_length])
                     test_targets.append(test_data[i+sequence_length])
                 
-                X_test = np.array(test_seqs)
-                y_test = np.array(test_targets)
+                X_test = cp.array(test_seqs)
+                y_test = cp.array(test_targets)
                 
                 print(f"Test data shapes: X_test={X_test.shape}, y_test={y_test.shape}")
                 

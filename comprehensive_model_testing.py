@@ -9,7 +9,7 @@ capabilities for the Brain-Inspired Neural Network.
 """
 
 import os
-import numpy as np
+import cupy as cp
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -165,7 +165,7 @@ class ModelTester:
         # Store basic metrics
         self.metrics['test_loss'] = total_loss / max(1, batch_count)
         self.metrics['num_batches'] = batch_count
-        self.metrics['avg_batch_time'] = np.mean(self.batch_times) if self.batch_times else 0
+        self.metrics['avg_batch_time'] = cp.mean(self.batch_times) if self.batch_times else 0
     
     def analyze_predictions(self):
         """Analyze prediction quality in detail."""
@@ -174,8 +174,8 @@ class ModelTester:
             return
         
         # Convert to numpy arrays
-        predictions = np.vstack(self.predictions)
-        targets = np.vstack(self.targets)
+        predictions = cp.vstack(self.predictions)
+        targets = cp.vstack(self.targets)
         
         # Flatten for easier analysis
         pred_flat = predictions.flatten()
@@ -183,7 +183,7 @@ class ModelTester:
         
         # Calculate comprehensive metrics
         mse = mean_squared_error(target_flat, pred_flat)
-        rmse = np.sqrt(mse)
+        rmse = cp.sqrt(mse)
         mae = mean_absolute_error(target_flat, pred_flat)
         
         # R² score
@@ -193,23 +193,23 @@ class ModelTester:
             r2 = 0.0
         
         # Mean Absolute Percentage Error
-        mape = np.mean(np.abs((target_flat - pred_flat) / (target_flat + 1e-8))) * 100
+        mape = cp.mean(cp.abs((target_flat - pred_flat) / (target_flat + 1e-8))) * 100
         
         # Directional accuracy (for time series)
         if len(pred_flat) > 1:
-            pred_diff = np.diff(pred_flat)
-            target_diff = np.diff(target_flat)
-            direction_accuracy = np.mean((pred_diff > 0) == (target_diff > 0)) * 100
+            pred_diff = cp.diff(pred_flat)
+            target_diff = cp.diff(target_flat)
+            direction_accuracy = cp.mean((pred_diff > 0) == (target_diff > 0)) * 100
         else:
             direction_accuracy = 0.0
         
         # Error distribution analysis
         errors = pred_flat - target_flat
-        error_std = np.std(errors)
-        error_mean = np.mean(errors)
+        error_std = cp.std(errors)
+        error_mean = cp.mean(errors)
         
         # Quantile analysis
-        error_quantiles = np.percentile(np.abs(errors), [25, 50, 75, 90, 95, 99])
+        error_quantiles = cp.percentile(cp.abs(errors), [25, 50, 75, 90, 95, 99])
         
         # Store detailed metrics
         self.detailed_metrics = {
@@ -230,16 +230,16 @@ class ModelTester:
                 'q99': float(error_quantiles[5])
             },
             'predictions_stats': {
-                'mean': float(np.mean(pred_flat)),
-                'std': float(np.std(pred_flat)),
-                'min': float(np.min(pred_flat)),
-                'max': float(np.max(pred_flat))
+                'mean': float(cp.mean(pred_flat)),
+                'std': float(cp.std(pred_flat)),
+                'min': float(cp.min(pred_flat)),
+                'max': float(cp.max(pred_flat))
             },
             'targets_stats': {
-                'mean': float(np.mean(target_flat)),
-                'std': float(np.std(target_flat)),
-                'min': float(np.min(target_flat)),
-                'max': float(np.max(target_flat))
+                'mean': float(cp.mean(target_flat)),
+                'std': float(cp.std(target_flat)),
+                'min': float(cp.min(target_flat)),
+                'max': float(cp.max(target_flat))
             }
         }
         
@@ -252,23 +252,23 @@ class ModelTester:
             return
         
         # Convert to numpy array
-        activities = np.array(self.neuron_activities)
+        activities = cp.array(self.neuron_activities)
         
         # Calculate activity statistics
-        mean_activity = np.mean(activities, axis=0)
-        std_activity = np.std(activities, axis=0)
-        max_activity = np.max(activities, axis=0)
+        mean_activity = cp.mean(activities, axis=0)
+        std_activity = cp.std(activities, axis=0)
+        max_activity = cp.max(activities, axis=0)
         
         # Calculate active neuron percentage
         active_threshold = 0.1
-        active_neurons = np.mean(activities > active_threshold, axis=0)
+        active_neurons = cp.mean(activities > active_threshold, axis=0)
         
         self.metrics['neuron_analysis'] = {
             'mean_activity': mean_activity.tolist(),
             'std_activity': std_activity.tolist(),
             'max_activity': max_activity.tolist(),
             'active_neuron_percentage': active_neurons.tolist(),
-            'overall_activity': float(np.mean(mean_activity))
+            'overall_activity': float(cp.mean(mean_activity))
         }
     
     def create_all_visualizations(self, save_dir):
@@ -298,8 +298,8 @@ class ModelTester:
         
         # 1. Predictions vs Targets Scatter
         if self.predictions and self.targets:
-            pred_flat = np.vstack(self.predictions).flatten()
-            target_flat = np.vstack(self.targets).flatten()
+            pred_flat = cp.vstack(self.predictions).flatten()
+            target_flat = cp.vstack(self.targets).flatten()
             
             axes[0, 0].scatter(target_flat, pred_flat, alpha=0.6, s=20)
             axes[0, 0].plot([target_flat.min(), target_flat.max()], 
@@ -312,8 +312,8 @@ class ModelTester:
         # 2. Loss Distribution
         if self.losses:
             axes[0, 1].hist(self.losses, bins=50, alpha=0.7, color='skyblue', edgecolor='black')
-            axes[0, 1].axvline(np.mean(self.losses), color='red', linestyle='--', 
-                              label=f'Mean: {np.mean(self.losses):.4f}')
+            axes[0, 1].axvline(cp.mean(self.losses), color='red', linestyle='--', 
+                              label=f'Mean: {cp.mean(self.losses):.4f}')
             axes[0, 1].set_xlabel('Loss')
             axes[0, 1].set_ylabel('Frequency')
             axes[0, 1].set_title('Loss Distribution')
@@ -325,7 +325,7 @@ class ModelTester:
             axes[0, 2].plot(self.batch_times, color='green', alpha=0.7)
             axes[0, 2].set_xlabel('Batch Index')
             axes[0, 2].set_ylabel('Processing Time (ms)')
-            axes[0, 2].set_title(f'Batch Processing Times (Avg: {np.mean(self.batch_times):.2f}ms)')
+            axes[0, 2].set_title(f'Batch Processing Times (Avg: {cp.mean(self.batch_times):.2f}ms)')
             axes[0, 2].grid(True, alpha=0.3)
         
         # 4. Error Distribution
@@ -370,8 +370,8 @@ class ModelTester:
         if not self.predictions or not self.targets:
             return
         
-        pred_flat = np.vstack(self.predictions).flatten()
-        target_flat = np.vstack(self.targets).flatten()
+        pred_flat = cp.vstack(self.predictions).flatten()
+        target_flat = cp.vstack(self.targets).flatten()
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         fig.suptitle('Detailed Prediction Analysis', fontsize=16, fontweight='bold')
@@ -396,19 +396,19 @@ class ModelTester:
         axes[0, 1].grid(True, alpha=0.3)
         
         # 3. Error by Magnitude
-        target_abs = np.abs(target_flat)
-        error_abs = np.abs(residuals)
+        target_abs = cp.abs(target_flat)
+        error_abs = cp.abs(residuals)
         
         # Bin by target magnitude
-        bins = np.percentile(target_abs, np.linspace(0, 100, 11))
+        bins = cp.percentile(target_abs, cp.linspace(0, 100, 11))
         bin_centers = []
         bin_errors = []
         
         for i in range(len(bins)-1):
             mask = (target_abs >= bins[i]) & (target_abs < bins[i+1])
-            if np.sum(mask) > 0:
+            if cp.sum(mask) > 0:
                 bin_centers.append((bins[i] + bins[i+1]) / 2)
-                bin_errors.append(np.mean(error_abs[mask]))
+                bin_errors.append(cp.mean(error_abs[mask]))
         
         axes[1, 0].plot(bin_centers, bin_errors, 'o-', linewidth=2, markersize=8)
         axes[1, 0].set_xlabel('Target Magnitude')
@@ -417,8 +417,8 @@ class ModelTester:
         axes[1, 0].grid(True, alpha=0.3)
         
         # 4. Cumulative Error Distribution
-        sorted_errors = np.sort(np.abs(residuals))
-        cumulative_prob = np.arange(1, len(sorted_errors) + 1) / len(sorted_errors)
+        sorted_errors = cp.sort(cp.abs(residuals))
+        cumulative_prob = cp.arange(1, len(sorted_errors) + 1) / len(sorted_errors)
         
         axes[1, 1].plot(sorted_errors, cumulative_prob, linewidth=2)
         axes[1, 1].set_xlabel('Absolute Error')
@@ -428,7 +428,7 @@ class ModelTester:
         
         # Add percentile lines
         for p in [50, 90, 95, 99]:
-            error_p = np.percentile(np.abs(residuals), p)
+            error_p = cp.percentile(cp.abs(residuals), p)
             axes[1, 1].axvline(error_p, color='red', linestyle='--', alpha=0.7, 
                               label=f'{p}th percentile')
         
@@ -441,8 +441,8 @@ class ModelTester:
         if not self.predictions or not self.targets:
             return
         
-        pred_flat = np.vstack(self.predictions).flatten()
-        target_flat = np.vstack(self.targets).flatten()
+        pred_flat = cp.vstack(self.predictions).flatten()
+        target_flat = cp.vstack(self.targets).flatten()
         errors = pred_flat - target_flat
         
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
@@ -452,9 +452,9 @@ class ModelTester:
         axes[0, 0].hist(errors, bins=50, alpha=0.7, color='lightcoral', edgecolor='black', density=True)
         
         # Overlay normal distribution
-        mu, sigma = np.mean(errors), np.std(errors)
-        x = np.linspace(errors.min(), errors.max(), 100)
-        axes[0, 0].plot(x, (1/(sigma * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mu) / sigma) ** 2), 
+        mu, sigma = cp.mean(errors), cp.std(errors)
+        x = cp.linspace(errors.min(), errors.max(), 100)
+        axes[0, 0].plot(x, (1/(sigma * cp.sqrt(2 * cp.pi))) * cp.exp(-0.5 * ((x - mu) / sigma) ** 2), 
                        'b-', linewidth=2, label=f'Normal(μ={mu:.3f}, σ={sigma:.3f})')
         
         axes[0, 0].axvline(0, color='red', linestyle='--', label='Zero Error')
@@ -465,7 +465,7 @@ class ModelTester:
         axes[0, 0].grid(True, alpha=0.3)
         
         # 2. Absolute Error vs Target Value
-        axes[0, 1].scatter(target_flat, np.abs(errors), alpha=0.6, s=20, c='purple')
+        axes[0, 1].scatter(target_flat, cp.abs(errors), alpha=0.6, s=20, c='purple')
         axes[0, 1].set_xlabel('Target Value')
         axes[0, 1].set_ylabel('Absolute Error')
         axes[0, 1].set_title('Absolute Error vs Target Value')
@@ -486,7 +486,7 @@ class ModelTester:
         
         # 4. Rolling Error Statistics
         window_size = max(10, len(errors) // 50)
-        rolling_mae = pd.Series(np.abs(errors)).rolling(window_size).mean()
+        rolling_mae = pd.Series(cp.abs(errors)).rolling(window_size).mean()
         rolling_std = pd.Series(errors).rolling(window_size).std()
         
         axes[1, 0].plot(rolling_mae, label='Rolling MAE', linewidth=2)
@@ -498,15 +498,15 @@ class ModelTester:
         axes[1, 0].grid(True, alpha=0.3)
         
         # 5. Error Percentiles Box Plot
-        error_percentiles = [np.percentile(np.abs(errors), p) for p in range(0, 101, 10)]
-        axes[1, 1].boxplot([np.abs(errors)], labels=['Absolute Errors'])
+        error_percentiles = [cp.percentile(cp.abs(errors), p) for p in range(0, 101, 10)]
+        axes[1, 1].boxplot([cp.abs(errors)], labels=['Absolute Errors'])
         axes[1, 1].set_ylabel('Absolute Error')
         axes[1, 1].set_title('Error Distribution Box Plot')
         axes[1, 1].grid(True, alpha=0.3)
         
         # 6. Error Heatmap (if predictions are 2D)
-        if len(np.vstack(self.predictions).shape) > 1 and np.vstack(self.predictions).shape[1] > 1:
-            error_matrix = np.abs(np.vstack(self.predictions) - np.vstack(self.targets))
+        if len(cp.vstack(self.predictions).shape) > 1 and cp.vstack(self.predictions).shape[1] > 1:
+            error_matrix = cp.abs(cp.vstack(self.predictions) - cp.vstack(self.targets))
             im = axes[1, 2].imshow(error_matrix[:min(50, error_matrix.shape[0])].T, 
                                   aspect='auto', cmap='viridis')
             axes[1, 2].set_xlabel('Time Steps')
@@ -531,13 +531,13 @@ class ModelTester:
         if not self.neuron_activities:
             return
         
-        activities = np.array(self.neuron_activities)
+        activities = cp.array(self.neuron_activities)
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         fig.suptitle('Neuron Activity Analysis', fontsize=16, fontweight='bold')
         
         # 1. Average Activity per Layer
-        mean_activity = np.mean(activities, axis=0)
+        mean_activity = cp.mean(activities, axis=0)
         for layer_idx in range(mean_activity.shape[0]):
             axes[0, 0].plot(mean_activity[layer_idx], label=f'Layer {layer_idx}', linewidth=2)
         
@@ -550,8 +550,8 @@ class ModelTester:
         # 2. Activity Distribution
         all_activities = activities.flatten()
         axes[0, 1].hist(all_activities, bins=50, alpha=0.7, color='lightgreen', edgecolor='black')
-        axes[0, 1].axvline(np.mean(all_activities), color='red', linestyle='--', 
-                          label=f'Mean: {np.mean(all_activities):.3f}')
+        axes[0, 1].axvline(cp.mean(all_activities), color='red', linestyle='--', 
+                          label=f'Mean: {cp.mean(all_activities):.3f}')
         axes[0, 1].set_xlabel('Activity Level')
         axes[0, 1].set_ylabel('Frequency')
         axes[0, 1].set_title('Activity Distribution')
@@ -567,7 +567,7 @@ class ModelTester:
         
         # 4. Active Neuron Percentage
         active_threshold = 0.1
-        active_percentage = np.mean(activities > active_threshold, axis=0) * 100
+        active_percentage = cp.mean(activities > active_threshold, axis=0) * 100
         
         for layer_idx in range(active_percentage.shape[0]):
             axes[1, 1].bar(range(len(active_percentage[layer_idx])), active_percentage[layer_idx], 
@@ -588,16 +588,16 @@ class ModelTester:
         if not self.predictions or not self.targets:
             return
         
-        pred_flat = np.vstack(self.predictions).flatten()
-        target_flat = np.vstack(self.targets).flatten()
+        pred_flat = cp.vstack(self.predictions).flatten()
+        target_flat = cp.vstack(self.targets).flatten()
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         fig.suptitle('Time Series Analysis', fontsize=16, fontweight='bold')
         
         # 1. Directional Accuracy Analysis
         if len(pred_flat) > 1:
-            pred_diff = np.diff(pred_flat)
-            target_diff = np.diff(target_flat)
+            pred_diff = cp.diff(pred_flat)
+            target_diff = cp.diff(target_flat)
             
             # Calculate rolling directional accuracy
             window = max(10, len(pred_diff) // 20)
@@ -606,7 +606,7 @@ class ModelTester:
             for i in range(window, len(pred_diff)):
                 window_pred = pred_diff[i-window:i]
                 window_target = target_diff[i-window:i]
-                acc = np.mean((window_pred > 0) == (window_target > 0)) * 100
+                acc = cp.mean((window_pred > 0) == (window_target > 0)) * 100
                 rolling_dir_acc.append(acc)
             
             axes[0, 0].plot(range(window, len(pred_diff)), rolling_dir_acc, linewidth=2)
@@ -621,9 +621,9 @@ class ModelTester:
         def calculate_trend(data, window=20):
             trends = []
             for i in range(window, len(data)):
-                slope = np.polyfit(range(window), data[i-window:i], 1)[0]
+                slope = cp.polyfit(range(window), data[i-window:i], 1)[0]
                 trends.append(slope)
-            return np.array(trends)
+            return cp.array(trends)
         
         if len(pred_flat) > 20:
             pred_trends = calculate_trend(pred_flat)
@@ -641,9 +641,9 @@ class ModelTester:
         def calculate_volatility(data, window=20):
             volatilities = []
             for i in range(window, len(data)):
-                vol = np.std(data[i-window:i])
+                vol = cp.std(data[i-window:i])
                 volatilities.append(vol)
-            return np.array(volatilities)
+            return cp.array(volatilities)
         
         if len(pred_flat) > 20:
             pred_vol = calculate_volatility(pred_flat)
@@ -658,19 +658,19 @@ class ModelTester:
             axes[1, 0].grid(True, alpha=0.3)
         
         # 4. Prediction Confidence Analysis
-        pred_confidence = 1 / (1 + np.abs(pred_flat - target_flat))  # Simple confidence measure
+        pred_confidence = 1 / (1 + cp.abs(pred_flat - target_flat))  # Simple confidence measure
         
         # Bin predictions by confidence
-        conf_bins = np.percentile(pred_confidence, np.linspace(0, 100, 11))
+        conf_bins = cp.percentile(pred_confidence, cp.linspace(0, 100, 11))
         bin_accuracies = []
         bin_centers = []
         
         for i in range(len(conf_bins)-1):
             mask = (pred_confidence >= conf_bins[i]) & (pred_confidence < conf_bins[i+1])
-            if np.sum(mask) > 0:
+            if cp.sum(mask) > 0:
                 bin_centers.append((conf_bins[i] + conf_bins[i+1]) / 2)
-                bin_accuracy = 1 - np.mean(np.abs(pred_flat[mask] - target_flat[mask]) / 
-                                         (np.abs(target_flat[mask]) + 1e-8))
+                bin_accuracy = 1 - cp.mean(cp.abs(pred_flat[mask] - target_flat[mask]) / 
+                                         (cp.abs(target_flat[mask]) + 1e-8))
                 bin_accuracies.append(max(0, bin_accuracy))
         
         axes[1, 1].plot(bin_centers, bin_accuracies, 'o-', linewidth=2, markersize=8)
@@ -693,8 +693,8 @@ class ModelTester:
             if not self.predictions or not self.targets:
                 return
             
-            pred_flat = np.vstack(self.predictions).flatten()
-            target_flat = np.vstack(self.targets).flatten()
+            pred_flat = cp.vstack(self.predictions).flatten()
+            target_flat = cp.vstack(self.targets).flatten()
             errors = pred_flat - target_flat
             
             # Create subplots
@@ -874,7 +874,7 @@ class ModelTester:
                     <h2>📊 Executive Summary</h2>
                     <p><strong>Test Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                     <p><strong>Model Type:</strong> Brain-Inspired Neural Network with Neuromodulation</p>
-                    <p><strong>Test Samples:</strong> {len(np.vstack(self.predictions)) if self.predictions else 0}</p>
+                    <p><strong>Test Samples:</strong> {len(cp.vstack(self.predictions)) if self.predictions else 0}</p>
                     <p><strong>Overall Performance:</strong> 
                         <span class="{'status-good' if self.metrics.get('r2', 0) > 0.7 else 'status-warning' if self.metrics.get('r2', 0) > 0.4 else 'status-bad'}">
                             {'Excellent' if self.metrics.get('r2', 0) > 0.7 else 'Good' if self.metrics.get('r2', 0) > 0.4 else 'Needs Improvement'}

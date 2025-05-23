@@ -1,5 +1,12 @@
 import torch
-import numpy as np
+try:
+    import cupy as cp
+    USING_CUPY = True
+    print("Using CuPy for financial data processing")
+except ImportError:
+    import numpy as cp
+    USING_CUPY = False
+    print("Using NumPy for financial data (consider installing CuPy for better performance)")
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 
@@ -30,7 +37,7 @@ class AugmentedTimeSeriesDataset(Dataset):
         self.sequence_first = sequence_first
         
         # Set RNG seed for reproducibility while allowing randomness
-        self.rng = np.random.RandomState(42)
+        self.rng = cp.random.RandomState(42)
     
     def __len__(self):
         return len(self.base_dataset)
@@ -96,8 +103,8 @@ class AugmentedTimeSeriesDataset(Dataset):
                     n_points = max(2, int(seq_len * self.augment_strength))
                     
                     # Generate warping points and create displacement field
-                    orig_steps = np.arange(seq_len)
-                    warp_steps = np.zeros(seq_len)
+                    orig_steps = cp.arange(seq_len)
+                    warp_steps = cp.zeros(seq_len)
                     
                     # Generate random warp points
                     warp_points = self.rng.choice(seq_len, size=n_points)
@@ -117,14 +124,14 @@ class AugmentedTimeSeriesDataset(Dataset):
                     new_steps = orig_steps + warp_steps
                     
                     # Ensure steps are within bounds
-                    new_steps = np.clip(new_steps, 0, seq_len - 1)
+                    new_steps = cp.clip(new_steps, 0, seq_len - 1)
                     
                     # Interpolate data at new time steps
                     for b in range(augmented.shape[0]):
                         for f in range(features):
                             series = augmented[b, :, f].numpy()
                             augmented[b, :, f] = torch.tensor(
-                                np.interp(orig_steps, new_steps, series),
+                                cp.interp(orig_steps, new_steps, series),
                                 dtype=augmented.dtype
                             )
                             
@@ -146,10 +153,10 @@ class AugmentedTimeSeriesDataset(Dataset):
                     for b in range(augmented.shape[0]):
                         for f in range(features):
                             orig_series = window[b, :, f].numpy()
-                            orig_steps = np.linspace(0, 1, num=window_size)
-                            new_steps = np.linspace(0, 1, num=seq_len)
+                            orig_steps = cp.linspace(0, 1, num=window_size)
+                            new_steps = cp.linspace(0, 1, num=seq_len)
                             augmented[b, :, f] = torch.tensor(
-                                np.interp(new_steps, orig_steps, orig_series),
+                                cp.interp(new_steps, orig_steps, orig_series),
                                 dtype=augmented.dtype
                             )
         
@@ -168,14 +175,14 @@ class AugmentedTimeSeriesDataset(Dataset):
         
         # Generate random frequency and phase for each feature
         freqs = torch.rand(features) * 3  # 0-3 cycles over the sequence
-        phases = torch.rand(features) * 2 * np.pi
+        phases = torch.rand(features) * 2 * cp.pi
         
         # Create time steps
         t = torch.linspace(0, 1, seq_len).unsqueeze(0).unsqueeze(2)  # [1, seq, 1]
         t = t.repeat(batch_size, 1, features)  # [batch, seq, features]
         
         # Generate smooth sinusoidal noise
-        noise = torch.sin(2 * np.pi * freqs * t + phases)
+        noise = torch.sin(2 * cp.pi * freqs * t + phases)
         
         return noise
 
@@ -252,7 +259,7 @@ def add_financial_features(df):
         close = result['Close']
         
         # Log returns (daily percentage change, more normally distributed than raw price)
-        result['LogReturn'] = np.log(close / close.shift(1))
+        result['LogReturn'] = cp.log(close / close.shift(1))
         
         # Price momentum (absolute price change over different windows)
         for window in [5, 10, 20]:
@@ -457,12 +464,12 @@ def detect_market_regime(df, window=50):
         if len(prices) < window:
             return 0.0
         
-        x = np.arange(len(prices))
-        coeffs = np.polyfit(x, prices, 1)
+        x = cp.arange(len(prices))
+        coeffs = cp.polyfit(x, prices, 1)
         slope = coeffs[0]
         
         # Normalize by price level
-        avg_price = np.mean(prices)
+        avg_price = cp.mean(prices)
         normalized_slope = slope / avg_price if avg_price > 0 else 0
         
         return normalized_slope

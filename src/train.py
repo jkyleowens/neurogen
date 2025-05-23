@@ -5,6 +5,7 @@ Fixed training functions that properly handle model signatures
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+import cupy as cp
 
 def train_epoch(model, train_loader, optimizer, criterion, device):
     """
@@ -276,13 +277,13 @@ def test(model, test_loader, criterion, device):
             targets = torch.cat(all_targets, dim=0).numpy()
             
             # Calculate additional metrics
-            mse = np.mean((predictions - targets) ** 2)
-            rmse = np.sqrt(mse)
-            mae = np.mean(np.abs(predictions - targets))
+            mse = cp.mean((predictions - targets) ** 2)
+            rmse = cp.sqrt(mse)
+            mae = cp.mean(cp.abs(predictions - targets))
             
             # R² score
-            ss_tot = np.sum((targets - np.mean(targets, axis=0)) ** 2)
-            ss_res = np.sum((targets - predictions) ** 2)
+            ss_tot = cp.sum((targets - cp.mean(targets, axis=0)) ** 2)
+            ss_res = cp.sum((targets - predictions) ** 2)
             r2 = 1 - (ss_res / (ss_tot if ss_tot > 0 else 1e-10))
             
             metrics.update({

@@ -41,7 +41,14 @@ import sys
 import os
 import argparse
 import yaml
-import numpy as np
+try:
+    import cupy as cp
+    USING_CUPY = True
+    print("Using CuPy for GPU-accelerated array operations")
+except ImportError:
+    import numpy as cp
+    USING_CUPY = False
+    print("Using NumPy for array operations (consider installing CuPy for better performance)")
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -51,6 +58,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import json
 import shutil
+import time  # Add time import for performance timing
 
 # Import the model and utilities
 from src.model import BrainInspiredNN
@@ -439,14 +447,22 @@ def calculate_accuracy(output, target, threshold=0.1):
 
 def train_epoch(model, train_loader, optimizer, criterion, device, quiet=False):
     """Train the model for one epoch."""
+    epoch_start_time = time.time()
+    
     model.train()
     total_loss = 0.0
     batch_count = 0
     total_accuracy = 0.0
     
+    # Timing accumulators
+    data_loading_time = 0.0
+    model_forward_time = 0.0
+    loss_backward_time = 0.0
+    
     iterator = train_loader if quiet else tqdm(train_loader, desc='Training')
     
     for batch_idx, batch_data in enumerate(iterator):
+        batch_start_time = time.time()
         try:
             if len(batch_data) == 2:
                 data, target = batch_data
@@ -455,12 +471,15 @@ def train_epoch(model, train_loader, optimizer, criterion, device, quiet=False):
             else:
                 continue
             
+            data_prep_start = time.time()
             model.reset_state()
             data, target = data.to(device), target.to(device)
             
             if target.dim() == 1:
                 target = target.unsqueeze(1)
+            data_loading_time += time.time() - data_prep_start
             
+            forward_start = time.time()
             if optimizer is None:
                 # Neuromodulator-driven learning
                 with torch.no_grad():
@@ -483,11 +502,15 @@ def train_epoch(model, train_loader, optimizer, criterion, device, quiet=False):
                 
                 loss = criterion(output, target)
                 final_loss = loss
+            model_forward_time += time.time() - forward_start
                 
+            if optimizer is not None:
+                backward_start = time.time()
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
+                loss_backward_time += time.time() - backward_start
             
             if torch.isnan(final_loss) or torch.isinf(final_loss):
                 continue
@@ -502,10 +525,26 @@ def train_epoch(model, train_loader, optimizer, criterion, device, quiet=False):
                 print(f"Error in batch {batch_idx}: {str(e)}")
             continue
     
+    epoch_total_time = time.time() - epoch_start_time
+    
+    # Print timing summary
+    if not quiet and batch_count > 0:
+        print(f"⏱️  Epoch Timing Summary:")
+        print(f"   Total epoch time: {epoch_total_time:.2f}s")
+        print(f"   Data loading time: {data_loading_time:.2f}s ({data_loading_time/epoch_total_time*100:.1f}%)")
+        print(f"   Model forward time: {model_forward_time:.2f}s ({model_forward_time/epoch_total_time*100:.1f}%)")
+        print(f"   Loss backward time: {loss_backward_time:.2f}s ({loss_backward_time/epoch_total_time*100:.1f}%)")
+        print(f"   Avg time per batch: {epoch_total_time/batch_count:.3f}s")
+    
     return (total_loss / max(1, batch_count), total_accuracy / max(1, batch_count))
 
 def validate(model, val_loader, criterion, device, quiet=False):
     """Validate the model."""
+    validation_start_time = time.time()
+    data_loading_time = 0.0
+    model_forward_time = 0.0
+    shape_fixing_time = 0.0
+    
     model.reset_state()
     model.eval()
     total_loss = 0.0
@@ -517,6 +556,7 @@ def validate(model, val_loader, criterion, device, quiet=False):
     with torch.no_grad():
         for batch_idx, batch_data in enumerate(iterator):
             try:
+                batch_start = time.time()
                 if len(batch_data) == 2:
                     data, target = batch_data
                 elif len(batch_data) == 3:
@@ -524,13 +564,21 @@ def validate(model, val_loader, criterion, device, quiet=False):
                 else:
                     continue
                 
+                # Measure data transfer time
+                data_to_device_start = time.time()
                 data, target = data.to(device), target.to(device)
                 
                 if target.dim() == 1:
                     target = target.unsqueeze(1)
+                data_loading_time += time.time() - data_to_device_start
                 
+                # Measure model forward time
+                forward_start = time.time()
                 output = model(data)
+                model_forward_time += time.time() - forward_start
                 
+                # Measure shape fixing time
+                shape_fixing_start = time.time()
                 if output.shape != target.shape:
                     if output.dim() == 3 and target.dim() == 2:
                         output = output[:, -1, :]
@@ -538,6 +586,7 @@ def validate(model, val_loader, criterion, device, quiet=False):
                         min_features = min(output.shape[-1], target.shape[-1])
                         output = output[..., :min_features]
                         target = target[..., :min_features]
+                shape_fixing_time += time.time() - shape_fixing_start
                 
                 loss = criterion(output, target)
                 
@@ -1007,8 +1056,14 @@ def run_basic_testing(model, test_loader, device, output_dir, quiet=False):
                 total_loss += loss.item()
                 batch_count += 1
                 
-                all_predictions.append(output.cpu().numpy())
-                all_targets.append(target.cpu().numpy())
+                if USING_CUPY:
+                    # Use CuPy for array conversions
+                    all_predictions.append(cp.asarray(output.cpu()))
+                    all_targets.append(cp.asarray(target.cpu()))
+                else:
+                    # Fall back to numpy
+                    all_predictions.append(output.cpu().numpy())
+                    all_targets.append(target.cpu().numpy())
                 
             except Exception:
                 continue
@@ -1017,15 +1072,15 @@ def run_basic_testing(model, test_loader, device, output_dir, quiet=False):
         return {}
     
     # Calculate metrics
-    predictions = np.vstack(all_predictions).flatten()
-    targets = np.vstack(all_targets).flatten()
+    predictions = cp.vstack(all_predictions).flatten()
+    targets = cp.vstack(all_targets).flatten()
     
-    mse = np.mean((predictions - targets) ** 2)
-    mae = np.mean(np.abs(predictions - targets))
-    rmse = np.sqrt(mse)
+    mse = cp.mean((predictions - targets) ** 2)
+    mae = cp.mean(cp.abs(predictions - targets))
+    rmse = cp.sqrt(mse)
     
-    ss_tot = np.sum((targets - np.mean(targets)) ** 2)
-    ss_res = np.sum((targets - predictions) ** 2)
+    ss_tot = cp.sum((targets - cp.mean(targets)) ** 2)
+    ss_res = cp.sum((targets - predictions) ** 2)
     r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
     
     metrics = {
@@ -1117,9 +1172,15 @@ def save_predictions_to_csv(model, test_loader, device, output_path):
                     output = output[..., :min_features]
                     target = target[..., :min_features]
                 
-                # Convert to numpy and store
-                pred_np = output.cpu().numpy()
-                target_np = target.cpu().numpy()
+                # Convert to array and store
+                if USING_CUPY:
+                    # Use CuPy for array conversions
+                    pred_np = cp.asarray(output.cpu())
+                    target_np = cp.asarray(target.cpu())
+                else:
+                    # Fall back to numpy
+                    pred_np = output.cpu().numpy()
+                    target_np = target.cpu().numpy()
                 
                 for i in range(len(pred_np)):
                     results.append({
